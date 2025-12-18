@@ -1,0 +1,108 @@
+/* Print styles for Customer Ledger */
+@media print {
+  /* Hide unnecessary elements */
+  .ant-layout-header,
+  .ant-layout-sider,
+  .ant-btn,
+  .ant-select,
+  .ant-picker,
+  .ant-card-actions,
+  .ant-dropdown,
+  .ant-table-selection,
+  .ant-table-thead .ant-table-filter-column,
+  .ant-pagination,
+  .ant-table-summary {
+    display: none !important;
+  }
+
+  /* Show customer ledger container */
+  .customer-ledger-container {
+    padding: 0 !important;
+  }
+
+  /* Card styling for print */
+  .ant-card {
+    border: none !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .ant-card-body {
+    padding: 10px 0 !important;
+  }
+
+  /* Table styling for print */
+  .ant-table {
+    border: 1px solid #ddd !important;
+  }
+
+  .ant-table-thead > tr > th {
+    background-color: #f5f5f5 !important;
+    border-bottom: 2px solid #ddd !important;
+    font-weight: bold !important;
+    color: #000 !important;
+  }
+
+  .ant-table-tbody > tr > td {
+    border-bottom: 1px solid #ddd !important;
+  }
+
+  /* Ensure text colors are visible */
+  .ant-typography {
+    color: #000 !important;
+  }
+
+  /* Page breaks */
+  .ant-table {
+    page-break-inside: avoid;
+  }
+
+  /* Header styling */
+  h3.ant-typography {
+    color: #000 !important;
+    font-size: 18px !important;
+    margin-bottom: 5px !important;
+  }
+
+  /* Summary cards */
+  .ant-statistic-title {
+    color: #666 !important;
+    font-size: 12px !important;
+  }
+
+  .ant-statistic-content {
+    color: #000 !important;
+    font-size: 14px !important;
+  }
+
+  /* Fix table width */
+  .ant-table-content {
+    width: 100% !important;
+    overflow: visible !important;
+  }
+}
+
+/* Regular styles */
+.customer-ledger-container {
+  background: #fff;
+}
+
+/* Summary cards hover effect */
+.ant-card {
+  transition: all 0.3s ease;
+}
+
+.ant-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Table row hover effect */
+.ant-table-tbody > tr:hover > td {
+  background-color: #fafafa !important;
+}
+
+/* Filter section */
+.ant-card .ant-row {
+  margin-bottom: 0;
+}

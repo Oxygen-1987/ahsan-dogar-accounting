@@ -1,0 +1,254 @@
+/* Customers.css - Light mode only */
+.customers-container {
+  padding: 16px;
+  background: #f0f2f5;
+  min-height: calc(100vh - 64px);
+}
+
+/* Summary Cards */
+.summary-card {
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  background: white;
+  border: 1px solid #f0f0f0;
+}
+
+.summary-card .ant-statistic-title {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+/* Header Card */
+.customers-header-card {
+  margin-bottom: 16px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  background: white;
+}
+
+.customers-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* Mobile Header */
+.mobile-header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.mobile-header-bottom {
+  width: 100%;
+}
+
+/* List Card */
+.customers-list-card {
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  background: white;
+  min-height: 400px;
+}
+
+/* Mobile Customer Card */
+.mobile-customer-card {
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+  border: 1px solid #f0f0f0;
+}
+
+.mobile-customer-card:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+  border-color: #d9d9d9;
+}
+
+.mobile-customer-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mobile-customer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.mobile-customer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.mobile-customer-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mobile-customer-info {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+}
+
+.mobile-customer-balance {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid #f0f0f0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.mobile-balance-label {
+  font-size: 13px;
+  color: #666;
+}
+
+.mobile-balance-amount {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.mobile-balance-amount.positive {
+  color: #cf1322;
+}
+
+.mobile-balance-amount.negative {
+  color: #52c41a;
+}
+
+.mobile-balance-amount.zero {
+  color: #666;
+}
+
+.mobile-customer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Balance display styles */
+.balance-display {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.balance-display.positive {
+  color: #cf1322;
+}
+
+.balance-display.negative {
+  color: #52c41a;
+}
+
+.balance-display.zero {
+  color: #666;
+}
+
+/* Table row styles */
+.customer-table-row:hover td {
+  background-color: #f5f5f5 !important;
+  transition: background-color 0.3s ease;
+}
+
+/* No customers message */
+.no-customers {
+  text-align: center;
+  padding: 40px;
+  color: #999;
+}
+
+/* Mobile dropdown adjustments */
+.mobile-customer-dropdown .ant-dropdown-menu {
+  min-width: 180px !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .customers-container {
+    padding: 12px;
+  }
+
+  .customers-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .header-controls {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .header-controls .ant-input-search {
+    width: 100% !important;
+  }
+
+  .mobile-customers-list {
+    padding: 4px;
+  }
+
+  .mobile-customer-card {
+    margin-bottom: 8px;
+  }
+}
+
+@media (max-width: 576px) {
+  .customers-container {
+    padding: 8px;
+  }
+
+  .customers-header-card,
+  .customers-list-card,
+  .summary-card {
+    border-radius: 6px;
+  }
+
+  .mobile-customer-content {
+    gap: 8px;
+  }
+
+  .mobile-customer-balance {
+    padding: 6px 0;
+  }
+
+  .mobile-balance-label {
+    font-size: 12px;
+  }
+
+  .mobile-balance-amount {
+    font-size: 13px;
+  }
+}
+
+/* Touch-friendly */
+@media (hover: none) and (pointer: coarse) {
+  .mobile-customer-card {
+    padding: 12px !important;
+  }
+
+  .mobile-customer-actions .ant-btn {
+    min-height: 44px;
+    font-size: 14px;
+  }
+
+  .mobile-customer-header .ant-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .balance-display {
+    font-size: 15px;
+  }
+}

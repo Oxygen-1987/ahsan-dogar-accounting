@@ -1,0 +1,47 @@
+/* Invoice table row hover effects */
+.invoice-table-row:hover td {
+  background-color: #f5f5f5 !important;
+  transition: background-color 0.3s ease;
+}
+
+/* Prevent table row click when interacting with actions */
+.invoice-table-row .ant-table-cell:last-child {
+  position: relative;
+}
+
+.invoice-table-row .ant-table-cell:last-child > * {
+  position: relative;
+  z-index: 1000;
+}
+
+/* Ensure dropdown doesn't trigger row click */
+.invoice-table-row .ant-dropdown-trigger {
+  pointer-events: auto !important;
+}
+
+/* Action container should not propagate clicks */
+.invoice-action-container {
+  position: relative;
+  z-index: 1000;
+}
+
+/* Dropdown menu should be above everything */
+.ant-dropdown {
+  z-index: 1001 !important;
+  pointer-events: auto !important;
+}
+
+.ant-dropdown-menu {
+  pointer-events: auto !important;
+}
+
+/* Text buttons styling */
+.invoice-table-row .ant-btn-link {
+  color: #1890ff !important;
+  font-size: 12px !important;
+}
+
+.invoice-table-row .ant-btn-link:hover {
+  color: #40a9ff !important;
+  background: transparent !important;
+}

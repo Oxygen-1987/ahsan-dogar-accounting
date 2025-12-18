@@ -1,0 +1,60 @@
+.create-invoice-page {
+  background: #f5f5f5;
+  min-height: 100vh;
+}
+
+/* Line items table styling */
+.line-items-table .ant-table-thead > tr > th {
+  background: #fafafa;
+  font-weight: 600;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.line-items-table .ant-table-tbody > tr > td {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 8px;
+}
+
+.line-items-table .ant-table-tbody > tr:hover > td {
+  background: #fafafa;
+}
+
+/* Input styling for line items */
+.line-items-table .ant-input,
+.line-items-table .ant-input-number {
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+}
+
+.line-items-table .ant-input:focus,
+.line-items-table .ant-input-number:focus {
+  border-color: #40a9ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+}
+
+/* Total card styling */
+.ant-card.total-card {
+  border: 1px solid #d9d9d9;
+  background: #fafafa;
+}
+
+/* Form item spacing */
+.ant-form-item {
+  margin-bottom: 16px;
+}
+
+/* Header styling */
+.create-invoice-page .ant-card .ant-card-body {
+  padding: 16px 24px;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .create-invoice-page .ant-row {
+    flex-direction: column;
+  }
+  
+  .create-invoice-page .ant-col {
+    margin-bottom: 16px;
+  }
+}

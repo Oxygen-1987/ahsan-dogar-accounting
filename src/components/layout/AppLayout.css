@@ -1,0 +1,826 @@
+.app-layout {
+  min-height: 100vh;
+  background: #f0f2f5;
+}
+
+/* Main Header Styles - Light Gray */
+.main-header {
+  position: fixed !important;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: #ffffff !important;
+  padding: 0 24px !important;
+  height: 70px !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 16px 16px 0 0 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-bottom: 1px solid #f0f0f0;
+  overflow: visible !important;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+}
+
+.company-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.company-logo {
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, #00b96b 0%, #00a05a 100%);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  color: white;
+  font-size: 14px;
+  overflow: hidden;
+  /* Add this */
+}
+
+.company-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Add this */
+}
+
+.company-details {
+  color: #1f2937;
+}
+
+.company-name {
+  font-size: 16px;
+  font-weight: bold;
+  line-height: 1.2;
+  color: #1f2937;
+}
+
+.company-subtitle {
+  font-size: 11px;
+  color: #6b7280;
+  line-height: 1.2;
+}
+
+/* Search Bar - Centered vertically */
+.header-center {
+  flex: 1;
+  max-width: 600px;
+  margin: 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.search-container {
+  width: 600px;
+  max-width: 700px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+}
+
+.global-search {
+  width: 100%;
+}
+
+/* Remove the inner wrapper border and style only the outer container */
+.global-search .ant-input-affix-wrapper {
+  border: 1px solid #000000 !important;
+  /* Main black border */
+  border-radius: 25px 0 0 25px !important;
+  /* Left rounded, right straight */
+  overflow: hidden;
+  border-right: none !important;
+  /* Remove right border to connect with button */
+}
+
+.global-search .ant-input {
+  border: none !important;
+  /* Remove inner input border */
+  border-radius: 25px 0 0 25px !important;
+  /* Match wrapper */
+  padding: 8px 16px;
+  font-size: 14px;
+  background: white;
+}
+
+/* Style the addon (button) */
+.global-search .ant-input-group-addon {
+  background: #fa8c16;
+  /* Orange button */
+  border: 1px solid #000000 !important;
+  /* Black border */
+  border-left: none !important;
+  /* Remove left border to connect with input */
+  border-radius: 0 25px 25px 0 !important;
+  /* Right rounded, left straight */
+  margin-left: 0;
+}
+
+.global-search .ant-input-group-addon button {
+  color: white !important;
+  border: none !important;
+  background: transparent !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  border-radius: 0 25px 25px 0 !important;
+  /* Match the button shape */
+}
+
+/* Focus states - apply to wrapper */
+.global-search .ant-input-affix-wrapper:focus,
+.global-search .ant-input-affix-wrapper-focused {
+  border-color: #000000 !important;
+  box-shadow: 0 0 0 2px rgba(250, 140, 22, 0.1);
+  z-index: 1;
+  /* Ensure it appears above button */
+}
+
+/* Also apply focus to button when wrapper is focused */
+.global-search .ant-input-affix-wrapper:focus+.ant-input-group-addon,
+.global-search .ant-input-affix-wrapper-focused+.ant-input-group-addon {
+  border-color: #000000 !important;
+  z-index: 1;
+}
+
+.global-search .ant-input-affix-wrapper:hover {
+  border-color: #000000 !important;
+}
+
+/* Hover effect on button when wrapper is hovered */
+.global-search .ant-input-affix-wrapper:hover+.ant-input-group-addon {
+  border-color: #000000 !important;
+}
+
+/* Remove any box-shadow on the wrapper */
+.global-search .ant-input-affix-wrapper,
+.global-search .ant-input-affix-wrapper:hover,
+.global-search .ant-input-affix-wrapper:focus {
+  box-shadow: none !important;
+}
+
+/* Ensure no parent is blocking interactions */
+.search-container * {
+  pointer-events: auto !important;
+}
+
+/* Header Right */
+.header-right {
+  display: flex;
+  align-items: center;
+}
+
+.header-icon {
+  color: #6b7280 !important;
+  font-size: 18px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.header-icon:hover {
+  background: #f3f4f6 !important;
+  border-radius: 8px;
+  color: #00b96b !important;
+}
+
+.user-avatar {
+  background: #00b96b;
+  cursor: pointer;
+}
+
+.user-avatar:hover {
+  background: #00a05a;
+}
+
+/* Content Layout */
+.content-layout {
+  margin-top: 70px !important;
+  background: transparent;
+  min-height: calc(100vh - 70px);
+  position: relative;
+}
+
+/* Sidebar Styles */
+.app-sidebar {
+  position: sticky !important;
+  top: 70px;
+  height: calc(100vh - 70px);
+  background: #001529 !important;
+  border-radius: 0 0 0 16px;
+  margin-left: 10px;
+  min-height: calc(100vh - 70px);
+}
+
+.app-sidebar .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Sidebar Toggle Button - Half outside with shadow */
+.sidebar-toggle-container {
+  position: absolute;
+  top: 14px;
+  right: -19px;
+  z-index: 1101;
+}
+
+.sidebar-toggle-btn {
+  width: 20px;
+  height: 28px;
+  background: rgb(255, 255, 255) !important;
+  border: none !important;
+  border-radius: 6px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #01140c !important;
+  padding: 0 !important;
+  min-width: 24px !important;
+  margin-top: 24px;
+  z-index: 999;
+}
+
+.sidebar-toggle-btn:hover {
+  background: #343535 !important;
+  color: white !important;
+  box-shadow: 0 4px 12px rgba(0, 185, 107, 0.3);
+}
+
+.sidebar-controls {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 4px 2px;
+  gap: 4px;
+  margin-bottom: 4px;
+  margin-top: -4px;
+}
+
+.sidebar-menu {
+  flex: 1;
+  background: transparent !important;
+  border: none !important;
+  padding: 4px 0;
+  margin-top: -12px;
+}
+
+.sidebar-menu .ant-menu-item {
+  margin: 2px 8px !important;
+  border-radius: 8px;
+  height: 40px;
+  line-height: 40px;
+  z-index: 1001;
+  position: relative;
+}
+
+.sidebar-menu .ant-menu-item-selected {
+  background: #00b96b !important;
+}
+
+.sidebar-menu .ant-menu-item .anticon {
+  font-size: 16px;
+}
+
+/* Main Content Styles */
+.main-content {
+  background: transparent;
+  padding: 24px;
+  margin: 0 10px 10px 0;
+  min-height: calc(100vh - 70px);
+}
+
+.content-wrapper {
+  background: #ffffff;
+  border-radius: 24px 0 24px 0px;
+  min-height: calc(100vh - 110px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  padding: 24px;
+  overflow: auto;
+}
+
+/* Ensure the main content area fills available space */
+.ant-layout-content {
+  flex: 1;
+}
+
+/* ==================== */
+/* SEARCH MODAL STYLES  */
+/* ==================== */
+
+.global-search-modal .ant-modal-content {
+  border-radius: 16px !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15) !important;
+  overflow: hidden;
+  border: 1px solid #f0f0f0;
+}
+
+.global-search-modal .ant-modal-close {
+  top: 12px;
+  right: 12px;
+}
+
+.global-search-modal .ant-modal-close-x {
+  width: 32px;
+  height: 32px;
+  line-height: 32px;
+  border-radius: 8px;
+}
+
+.global-search-modal .ant-modal-close-x:hover {
+  background-color: #f5f5f5;
+}
+
+/* Search input in modal */
+.global-search-modal .ant-input-group-wrapper {
+  width: 100%;
+}
+
+.global-search-modal .ant-input-search-button {
+  background: linear-gradient(135deg, #00b96b 0%, #00a05a 100%) !important;
+  border-color: #00a05a !important;
+}
+
+.global-search-modal .ant-input-search-button:hover {
+  background: linear-gradient(135deg, #00a05a 0%, #008c4c 100%) !important;
+  border-color: #008c4c !important;
+}
+
+/* Search result items */
+.search-result-item {
+  transition: all 0.2s ease;
+  border-radius: 8px !important;
+  margin: 4px 0 !important;
+}
+
+.search-result-item:hover {
+  background-color: #f6ffed !important;
+  transform: translateX(4px);
+  border-left: 3px solid #00b96b !important;
+}
+
+/* Type badges */
+.type-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.type-customer {
+  background-color: #e6f7ff;
+  color: #1890ff;
+  border: 1px solid #91d5ff;
+}
+
+.type-invoice {
+  background-color: #f6ffed;
+  color: #52c41a;
+  border: 1px solid #b7eb8f;
+}
+
+.type-payment {
+  background-color: #f9f0ff;
+  color: #722ed1;
+  border: 1px solid #d3adf7;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.hint-text {
+  background: rgba(255, 255, 255, 0.9);
+  padding: 4px 12px;
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  border: 1px solid #f0f0f0;
+}
+
+.hint-text strong {
+  color: #00b96b;
+  font-weight: 600;
+}
+
+/* Search focus effect */
+.search-container:focus-within .search-hints {
+  opacity: 1;
+}
+
+/* ==================== */
+/* RECENT SEARCHES      */
+/* ==================== */
+
+.recent-search-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  background: #f9f9f9;
+  border: 1px solid #e8e8e8;
+  border-radius: 16px;
+  font-size: 12px;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin: 0 8px 8px 0;
+}
+
+.recent-search-chip:hover {
+  background: #e6f7ff;
+  border-color: #91d5ff;
+  color: #1890ff;
+  transform: translateY(-1px);
+}
+
+.recent-search-chip .anticon {
+  font-size: 10px;
+  margin-right: 4px;
+}
+
+/* ==================== */
+/* QUICK ACTIONS        */
+/* ==================== */
+
+.quick-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.quick-action-btn {
+  border-radius: 8px !important;
+  height: 32px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  border-color: #00b96b !important;
+  color: #00b96b !important;
+  background: transparent !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+.quick-action-btn:hover {
+  background: #e6f7ff !important;
+  border-color: #00b96b !important;
+  color: #00a05a !important;
+  transform: translateY(-1px);
+}
+
+/* ==================== */
+/* SEARCH RESULTS PAGE  */
+/* ==================== */
+
+.search-results-page {
+  min-height: calc(100vh - 110px);
+  background: #ffffff;
+  border-radius: 24px 0 24px 0px;
+  padding: 24px;
+}
+
+.search-results-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.search-results-header .ant-btn {
+  border-radius: 8px;
+}
+
+.search-results-tabs .ant-tabs-nav {
+  margin-bottom: 24px;
+}
+
+.search-results-tabs .ant-tabs-tab {
+  padding: 8px 16px;
+  border-radius: 8px;
+  margin-right: 8px;
+}
+
+.search-results-tabs .ant-tabs-tab-active {
+  background: #f6ffed;
+  border-color: #00b96b;
+}
+
+.search-results-tabs .ant-tabs-ink-bar {
+  background: #00b96b;
+}
+
+/* ==================== */
+/* ANIMATIONS           */
+/* ==================== */
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.global-search-modal .ant-modal-content {
+  animation: slideDown 0.3s ease;
+}
+
+/* ==================== */
+/* LOADING STATES       */
+/* ==================== */
+
+.search-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 0;
+}
+
+.search-loading-spinner {
+  color: #00b96b;
+}
+
+.search-loading-text {
+  margin-top: 16px;
+  color: #666;
+  font-size: 14px;
+}
+
+/* ==================== */
+/* EMPTY STATES         */
+/* ==================== */
+
+.search-empty-state {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.search-empty-state .ant-empty-image {
+  height: 80px;
+  margin-bottom: 16px;
+}
+
+.search-empty-state .ant-empty-description {
+  color: #666;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ==================== */
+/* KEYBOARD SHORTCUT    */
+/* ==================== */
+
+.keyboard-shortcut {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  background: #f0f0f0;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: monospace;
+  color: #666;
+  margin-left: 8px;
+}
+
+/* ==================== */
+/* DARK THEME SUPPORT   */
+/* ==================== */
+
+@media (prefers-color-scheme: dark) {
+  .search-result-item:hover {
+    background-color: #1f1f1f !important;
+    border-left-color: #00b96b !important;
+  }
+
+  .global-search .ant-input {
+    background-color: #1f1f1f;
+    border-color: #444;
+    color: #fff;
+  }
+
+  .global-search .ant-input:focus {
+    border-color: #00b96b;
+    box-shadow: 0 0 0 2px rgba(0, 185, 107, 0.2);
+  }
+
+  .recent-search-chip {
+    background: #2a2a2a;
+    border-color: #444;
+    color: #ccc;
+  }
+
+  .recent-search-chip:hover {
+    background: #1a3a2a;
+    border-color: #00b96b;
+    color: #00b96b;
+  }
+
+  .hint-text {
+    background: rgba(31, 31, 31, 0.9);
+    border-color: #444;
+    color: #999;
+  }
+
+  .hint-text strong {
+    color: #00b96b;
+  }
+
+  .keyboard-shortcut {
+    background: #2a2a2a;
+    border-color: #444;
+    color: #999;
+  }
+}
+
+/* ==================== */
+/* RESPONSIVE DESIGN    */
+/* ==================== */
+
+@media (max-width: 992px) {
+  .search-container {
+    width: 400px;
+  }
+
+  .global-search-modal {
+    width: 90% !important;
+    max-width: 500px;
+  }
+}
+
+@media (max-width: 768px) {
+  .main-header {
+    position: relative !important;
+    margin-top: 0;
+  }
+
+  .header-center {
+    order: 3;
+    margin: 12px 0 0 0;
+    max-width: 100%;
+    min-width: 100%;
+  }
+
+  .company-name {
+    font-size: 14px;
+  }
+
+  .company-subtitle {
+    font-size: 10px;
+  }
+
+  .main-content {
+    padding: 16px;
+    margin: 0 8px 8px 0;
+  }
+
+  .content-wrapper {
+    padding: 16px;
+    border-radius: 0 0 12px 12px;
+    min-height: calc(100vh - 130px);
+  }
+
+  .app-sidebar {
+    margin-left: 8px;
+  }
+
+  .sidebar-toggle-container {
+    top: 16px;
+    right: -10px;
+  }
+
+  .search-container {
+    width: 300px;
+  }
+
+  .search-hints {
+    display: none;
+  }
+
+  .global-search .ant-input {
+    font-size: 13px;
+    padding: 6px 12px;
+  }
+
+  .global-search-modal {
+    width: 95% !important;
+    margin: 10px;
+  }
+
+  .global-search-modal .ant-modal-content {
+    border-radius: 12px !important;
+  }
+}
+
+@media (max-width: 576px) {
+  .search-container {
+    width: 200px;
+  }
+
+  .global-search .ant-input {
+    font-size: 12px;
+    padding: 4px 8px;
+  }
+
+  .global-search .ant-input-group-addon {
+    padding: 0;
+  }
+
+  .global-search .ant-input-search-button {
+    color: white;
+    border: none;
+    border-radius: 0 20px 20px 0 !important;
+  }
+
+  /* Adjust header layout for mobile */
+  .header-center {
+    margin: 0 20px;
+  }
+
+  .company-name {
+    font-size: 14px;
+  }
+
+  .company-subtitle {
+    font-size: 10px;
+  }
+}
+
+/* ==================== */
+/* FIXES FOR INPUT BLOCKING ISSUE */
+/* ==================== */
+
+/* Ensure no overlay is blocking the search input */
+.search-container {
+  position: relative;
+  z-index: 2;
+}
+
+/* Remove any potential overlays */
+.search-container::before,
+.search-container::after,
+.global-search::before,
+.global-search::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* Force input to be interactive */
+.ant-input-affix-wrapper:not(.ant-input-affix-wrapper-disabled) {
+  cursor: text !important;
+}
+
+.ant-input:not(.ant-input-disabled) {
+  cursor: text !important;
+}
+
+/* Override any inline styles that might be blocking */
+.global-search [style*="pointer-events: none"],
+.global-search [style*="cursor: default"] {
+  pointer-events: auto !important;
+  cursor: text !important;
+}
+
+/* Make sure Ant Design Search component wrapper is not blocking */
+.ant-input-group-wrapper {
+  pointer-events: auto !important;
+}
+
+/* Fix for any parent container issues */
+.main-header,
+.header-center {
+  pointer-events: auto !important;
+}
+
+.main-header * {
+  pointer-events: auto !important;
+}
