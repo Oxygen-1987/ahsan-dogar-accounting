@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   Drawer,
   Button,
@@ -24,6 +24,7 @@ import {
 import type { Payment, PaymentAllocation } from "../../types";
 import { paymentService } from "../../services/paymentService";
 import dayjs from "dayjs";
+import EditPaymentModal from "./EditPaymentModal";
 
 interface PaymentSidePanelProps {
   visible: boolean;
@@ -45,6 +46,7 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
   onReload,
 }) => {
   const { message, modal } = App.useApp();
+  const [showEditModal, setShowEditModal] = useState(false);
 
   if (!payment) return null;
 
@@ -146,6 +148,16 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
     });
   };
 
+  const handleEdit = () => {
+    setShowEditModal(true);
+  };
+
+  const handleEditSuccess = () => {
+    setShowEditModal(false);
+    onReload();
+    message.success("Payment updated successfully");
+  };
+
   const allocationColumns = [
     {
       title: "Payee",
@@ -190,258 +202,270 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
   const remainingAmount = payment.total_received - totalAllocated;
 
   return (
-    <Drawer
-      title={
-        <div style={{ textAlign: "center", position: "relative" }}>
-          <Button
-            type="text"
-            icon={<CloseOutlined />}
-            onClick={onClose}
-            style={{ position: "absolute", left: 0, top: 0 }}
-          />
-          <div style={{ fontWeight: "bold", fontSize: "16px" }}>
-            {payment.payment_number}
+    <>
+      <Drawer
+        title={
+          <div style={{ textAlign: "center", position: "relative" }}>
+            <Button
+              type="text"
+              icon={<CloseOutlined />}
+              onClick={onClose}
+              style={{ position: "absolute", left: 0, top: 0 }}
+            />
+            <div style={{ fontWeight: "bold", fontSize: "16px" }}>
+              {payment.payment_number}
+            </div>
           </div>
-        </div>
-      }
-      placement="right"
-      onClose={onClose}
-      open={visible}
-      width={700}
-      styles={{
-        body: { padding: "16px 0" },
-        header: { padding: "16px 24px", borderBottom: "1px solid #f0f0f0" },
-        footer: {
-          padding: "16px 24px",
-          borderTop: "1px solid #f0f0f0",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        },
-      }}
-      footer={
-        <div
-          style={{
-            width: "100%",
+        }
+        placement="right"
+        onClose={onClose}
+        open={visible}
+        width={700}
+        styles={{
+          body: { padding: "16px 0" },
+          header: { padding: "16px 24px", borderBottom: "1px solid #f0f0f0" },
+          footer: {
+            padding: "16px 24px",
+            borderTop: "1px solid #f0f0f0",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-          }}
-        >
-          {/* Left side - Allocate and Status buttons */}
-          <Space>
-            {(payment.payment_method === "cheque" ||
-              payment.payment_method === "parchi") &&
-              payment.status === "pending" && (
-                <Button
-                  icon={<CheckCircleOutlined />}
-                  type="primary"
-                  onClick={handleMarkAsCompleted}
-                >
-                  Mark as Completed
-                </Button>
-              )}
-            {canAllocate() && (
-              <Button
-                icon={<DollarOutlined />}
-                type="primary"
-                onClick={() => onAllocate(payment)}
-              >
-                Allocate Funds
-              </Button>
-            )}
-          </Space>
-
-          {/* Right side - Edit and Delete buttons */}
-          <Space>
-            <Button icon={<EditOutlined />} onClick={() => onEdit(payment)}>
-              Edit Payment
-            </Button>
-            <Button icon={<DeleteOutlined />} danger onClick={handleDelete}>
-              Delete Payment
-            </Button>
-          </Space>
-        </div>
-      }
-    >
-      <div style={{ padding: "0 24px" }}>
-        {/* Status and Amount */}
-        <div style={{ textAlign: "center", marginBottom: 24 }}>
-          <Space>
-            <Tag
-              color={getStatusColor(payment.status)}
-              style={{ fontSize: "14px", padding: "4px 12px" }}
-            >
-              {payment.status.toUpperCase()}
-            </Tag>
-            <Tag
-              color={getPaymentMethodColor(payment.payment_method)}
-              style={{ fontSize: "14px", padding: "4px 12px" }}
-            >
-              {payment.payment_method.replace("_", " ").toUpperCase()}
-            </Tag>
-          </Space>
+          },
+        }}
+        footer={
           <div
             style={{
-              fontSize: "32px",
-              fontWeight: "bold",
-              margin: "16px 0",
-              color: "#00b96b",
+              width: "100%",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
             }}
           >
-            PKR {payment.total_received.toLocaleString()}
+            {/* Left side - Allocate and Status buttons */}
+            <Space>
+              {(payment.payment_method === "cheque" ||
+                payment.payment_method === "parchi") &&
+                payment.status === "pending" && (
+                  <Button
+                    icon={<CheckCircleOutlined />}
+                    type="primary"
+                    onClick={handleMarkAsCompleted}
+                  >
+                    Mark as Completed
+                  </Button>
+                )}
+              {canAllocate() && (
+                <Button
+                  icon={<DollarOutlined />}
+                  type="primary"
+                  onClick={() => onAllocate(payment)}
+                >
+                  Allocate Funds
+                </Button>
+              )}
+            </Space>
+
+            {/* Right side - Edit and Delete buttons */}
+            <Space>
+              <Button icon={<EditOutlined />} onClick={handleEdit}>
+                Edit Payment
+              </Button>
+              <Button icon={<DeleteOutlined />} danger onClick={handleDelete}>
+                Delete Payment
+              </Button>
+            </Space>
           </div>
-        </div>
-
-        <Divider />
-
-        {/* Payment Details */}
-        <Descriptions column={1} size="small">
-          <Descriptions.Item label="Payment Date">
-            {dayjs(payment.payment_date).format("DD/MM/YYYY")}
-          </Descriptions.Item>
-          <Descriptions.Item label="Customer">
-            <div>
-              <div>
-                <strong>{payment.customer?.company_name}</strong>
-              </div>
-              <div style={{ fontSize: "12px", color: "#666" }}>
-                {payment.customer?.first_name} {payment.customer?.last_name}
-              </div>
-              <div style={{ fontSize: "12px", color: "#666" }}>
-                {payment.customer?.mobile}
-              </div>
-            </div>
-          </Descriptions.Item>
-          {payment.reference_number && (
-            <Descriptions.Item label="Reference Number">
-              {payment.reference_number}
-            </Descriptions.Item>
-          )}
-          {payment.bank_name && (
-            <Descriptions.Item label="Bank Name">
-              {payment.bank_name}
-            </Descriptions.Item>
-          )}
-          {payment.cheque_date && (
-            <Descriptions.Item label="Cheque Date">
-              {dayjs(payment.cheque_date).format("DD/MM/YYYY")}
-            </Descriptions.Item>
-          )}
-          {payment.notes && (
-            <Descriptions.Item label="Notes">{payment.notes}</Descriptions.Item>
-          )}
-        </Descriptions>
-
-        <Divider />
-
-        {/* Allocation Summary */}
-        <Card size="small" style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <div>
-              <div>Total Received</div>
-              <strong style={{ fontSize: "16px" }}>
-                PKR {payment.total_received.toLocaleString()}
-              </strong>
-            </div>
-            <div>
-              <div>Allocated</div>
-              <strong style={{ fontSize: "16px", color: "#1890ff" }}>
-                PKR {totalAllocated.toLocaleString()}
-              </strong>
-            </div>
-            <div>
-              <div>Remaining</div>
-              <strong
-                style={{
-                  fontSize: "16px",
-                  color: remainingAmount > 0 ? "#faad14" : "#00b96b",
-                }}
+        }
+      >
+        <div style={{ padding: "0 24px" }}>
+          {/* Status and Amount */}
+          <div style={{ textAlign: "center", marginBottom: 24 }}>
+            <Space>
+              <Tag
+                color={getStatusColor(payment.status)}
+                style={{ fontSize: "14px", padding: "4px 12px" }}
               >
-                PKR {remainingAmount.toLocaleString()}
-              </strong>
-            </div>
-          </div>
-        </Card>
-
-        {/* Allocations */}
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontWeight: "500", marginBottom: 12 }}>
-            Payment Allocations
-          </div>
-          {payment.allocations && payment.allocations.length > 0 ? (
-            <Table
-              columns={allocationColumns}
-              dataSource={payment.allocations}
-              pagination={false}
-              size="small"
-              rowKey="id"
-            />
-          ) : (
+                {payment.status.toUpperCase()}
+              </Tag>
+              <Tag
+                color={getPaymentMethodColor(payment.payment_method)}
+                style={{ fontSize: "14px", padding: "4px 12px" }}
+              >
+                {payment.payment_method.replace("_", " ").toUpperCase()}
+              </Tag>
+            </Space>
             <div
               style={{
-                padding: "20px",
-                textAlign: "center",
-                color: "#999",
-                border: "1px dashed #d9d9d9",
-                borderRadius: "6px",
+                fontSize: "32px",
+                fontWeight: "bold",
+                margin: "16px 0",
+                color: "#00b96b",
               }}
             >
-              No allocations found for this payment
+              PKR {payment.total_received.toLocaleString()}
             </div>
-          )}
-        </div>
+          </div>
 
-        {/* Payment Timeline */}
-        <Divider />
-        <div style={{ fontWeight: "500", marginBottom: 12 }}>
-          Payment Timeline
-        </div>
-        <Timeline>
-          <Timeline.Item
-            dot={<ClockCircleOutlined style={{ fontSize: "16px" }} />}
-            color="blue"
-          >
-            <div>Payment Received</div>
-            <div style={{ fontSize: "12px", color: "#666" }}>
-              {dayjs(payment.created_at).format("DD/MM/YYYY HH:mm")}
+          <Divider />
+
+          {/* Payment Details */}
+          <Descriptions column={1} size="small">
+            <Descriptions.Item label="Payment Date">
+              {dayjs(payment.payment_date).format("DD/MM/YYYY")}
+            </Descriptions.Item>
+            <Descriptions.Item label="Customer">
+              <div>
+                <div>
+                  <strong>{payment.customer?.company_name}</strong>
+                </div>
+                <div style={{ fontSize: "12px", color: "#666" }}>
+                  {payment.customer?.first_name} {payment.customer?.last_name}
+                </div>
+                <div style={{ fontSize: "12px", color: "#666" }}>
+                  {payment.customer?.mobile}
+                </div>
+              </div>
+            </Descriptions.Item>
+            {payment.reference_number && (
+              <Descriptions.Item label="Reference Number">
+                {payment.reference_number}
+              </Descriptions.Item>
+            )}
+            {payment.bank_name && (
+              <Descriptions.Item label="Bank Name">
+                {payment.bank_name}
+              </Descriptions.Item>
+            )}
+            {payment.cheque_date && (
+              <Descriptions.Item label="Cheque Date">
+                {dayjs(payment.cheque_date).format("DD/MM/YYYY")}
+              </Descriptions.Item>
+            )}
+            {payment.notes && (
+              <Descriptions.Item label="Notes">
+                {payment.notes}
+              </Descriptions.Item>
+            )}
+          </Descriptions>
+
+          <Divider />
+
+          {/* Allocation Summary */}
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <div>
+                <div>Total Received</div>
+                <strong style={{ fontSize: "16px" }}>
+                  PKR {payment.total_received.toLocaleString()}
+                </strong>
+              </div>
+              <div>
+                <div>Allocated</div>
+                <strong style={{ fontSize: "16px", color: "#1890ff" }}>
+                  PKR {totalAllocated.toLocaleString()}
+                </strong>
+              </div>
+              <div>
+                <div>Remaining</div>
+                <strong
+                  style={{
+                    fontSize: "16px",
+                    color: remainingAmount > 0 ? "#faad14" : "#00b96b",
+                  }}
+                >
+                  PKR {remainingAmount.toLocaleString()}
+                </strong>
+              </div>
             </div>
-            <div style={{ fontSize: "12px", color: "#666" }}>
-              Amount: PKR {payment.total_received.toLocaleString()}
+          </Card>
+
+          {/* Allocations */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontWeight: "500", marginBottom: 12 }}>
+              Payment Allocations
             </div>
-          </Timeline.Item>
-          {(payment.payment_method === "cheque" ||
-            payment.payment_method === "parchi") && (
+            {payment.allocations && payment.allocations.length > 0 ? (
+              <Table
+                columns={allocationColumns}
+                dataSource={payment.allocations}
+                pagination={false}
+                size="small"
+                rowKey="id"
+              />
+            ) : (
+              <div
+                style={{
+                  padding: "20px",
+                  textAlign: "center",
+                  color: "#999",
+                  border: "1px dashed #d9d9d9",
+                  borderRadius: "6px",
+                }}
+              >
+                No allocations found for this payment
+              </div>
+            )}
+          </div>
+
+          {/* Payment Timeline */}
+          <Divider />
+          <div style={{ fontWeight: "500", marginBottom: 12 }}>
+            Payment Timeline
+          </div>
+          <Timeline>
             <Timeline.Item
-              dot={<CheckCircleOutlined style={{ fontSize: "16px" }} />}
-              color={payment.status === "completed" ? "green" : "gray"}
+              dot={<ClockCircleOutlined style={{ fontSize: "16px" }} />}
+              color="blue"
             >
-              <div>Cleared / Cashed Out</div>
+              <div>Payment Received</div>
               <div style={{ fontSize: "12px", color: "#666" }}>
-                {payment.status === "completed" ? "Completed" : "Pending"}
+                {dayjs(payment.created_at).format("DD/MM/YYYY HH:mm")}
+              </div>
+              <div style={{ fontSize: "12px", color: "#666" }}>
+                Amount: PKR {payment.total_received.toLocaleString()}
               </div>
             </Timeline.Item>
-          )}
-          {payment.allocations &&
-            payment.allocations.map((alloc, index) => (
+            {(payment.payment_method === "cheque" ||
+              payment.payment_method === "parchi") && (
               <Timeline.Item
-                key={alloc.id}
-                dot={<DollarOutlined style={{ fontSize: "16px" }} />}
-                color="green"
+                dot={<CheckCircleOutlined style={{ fontSize: "16px" }} />}
+                color={payment.status === "completed" ? "green" : "gray"}
               >
-                <div>Allocated to {alloc.payee_name}</div>
+                <div>Cleared / Cashed Out</div>
                 <div style={{ fontSize: "12px", color: "#666" }}>
-                  {dayjs(alloc.allocation_date).format("DD/MM/YYYY")} - PKR{" "}
-                  {alloc.amount.toLocaleString()}
-                </div>
-                <div style={{ fontSize: "12px", color: "#666" }}>
-                  Purpose: {alloc.purpose}
+                  {payment.status === "completed" ? "Completed" : "Pending"}
                 </div>
               </Timeline.Item>
-            ))}
-        </Timeline>
-      </div>
-    </Drawer>
+            )}
+            {payment.allocations &&
+              payment.allocations.map((alloc, index) => (
+                <Timeline.Item
+                  key={alloc.id}
+                  dot={<DollarOutlined style={{ fontSize: "16px" }} />}
+                  color="green"
+                >
+                  <div>Allocated to {alloc.payee_name}</div>
+                  <div style={{ fontSize: "12px", color: "#666" }}>
+                    {dayjs(alloc.allocation_date).format("DD/MM/YYYY")} - PKR{" "}
+                    {alloc.amount.toLocaleString()}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#666" }}>
+                    Purpose: {alloc.purpose}
+                  </div>
+                </Timeline.Item>
+              ))}
+          </Timeline>
+        </div>
+      </Drawer>
+
+      {/* Edit Payment Modal */}
+      <EditPaymentModal
+        visible={showEditModal}
+        payment={payment}
+        onClose={() => setShowEditModal(false)}
+        onSuccess={handleEditSuccess}
+      />
+    </>
   );
 };
 

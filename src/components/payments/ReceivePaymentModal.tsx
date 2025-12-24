@@ -19,6 +19,7 @@ import {
 import { customerService } from "../../services/customerService";
 import { invoiceService } from "../../services/invoiceService";
 import { paymentService } from "../../services/paymentService";
+import { ledgerService } from "../../services/ledgerService"; // Add this import
 import type {
   Customer,
   Invoice,
@@ -320,9 +321,148 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
     setTotalSelectedAmount(total);
   };
 
+  // Helper function to create payment with manual number
+  const createPaymentWithManualNumber = async (paymentData: any) => {
+    try {
+      // Instead of using window.supabase, we'll use the existing services
+      // For payment creation with manual number, we need to extend our paymentService
+      // For now, we'll create a simple version
+
+      // Import supabase directly from the service file
+      const { supabase } = await import("../../services/supabaseClient");
+
+      // Create the payment with manual number
+      const { data: payment, error } = await supabase
+        .from("payments")
+        .insert([
+          {
+            payment_number: paymentData.payment_number,
+            customer_id: paymentData.customer_id,
+            payment_date: paymentData.payment_date,
+            total_received: paymentData.total_received,
+            payment_method: paymentData.payment_method,
+            reference_number: paymentData.reference_number || null,
+            bank_name: paymentData.bank_name || null,
+            cheque_date: paymentData.cheque_date || null,
+            notes: paymentData.notes || null,
+            status: paymentData.status,
+          },
+        ])
+        .select()
+        .single();
+
+      if (error) {
+        throw new Error(`Failed to create payment: ${error.message}`);
+      }
+
+      if (payment) {
+        // Create ledger entry
+        const hasOpeningBalanceAllocation =
+          paymentData.opening_balance_allocation?.amount > 0;
+        const hasInvoiceAllocations =
+          paymentData.invoice_allocations &&
+          paymentData.invoice_allocations.length > 0;
+
+        let ledgerDescription = `Payment ${payment.payment_number} received`;
+
+        if (hasOpeningBalanceAllocation && hasInvoiceAllocations) {
+          const invoiceTotal = paymentData.invoice_allocations.reduce(
+            (sum: number, inv: any) => sum + inv.amount,
+            0
+          );
+          ledgerDescription = `Payment ${
+            payment.payment_number
+          } - PKR ${paymentData.opening_balance_allocation.amount.toLocaleString()} to opening balance, PKR ${invoiceTotal.toLocaleString()} to ${
+            paymentData.invoice_allocations.length
+          } invoice(s)`;
+        } else if (hasOpeningBalanceAllocation) {
+          ledgerDescription = `Payment ${
+            payment.payment_number
+          } - PKR ${paymentData.opening_balance_allocation.amount.toLocaleString()} to opening balance`;
+        } else if (hasInvoiceAllocations) {
+          const invoiceTotal = paymentData.invoice_allocations.reduce(
+            (sum: number, inv: any) => sum + inv.amount,
+            0
+          );
+          ledgerDescription = `Payment ${
+            payment.payment_number
+          } - PKR ${invoiceTotal.toLocaleString()} to ${
+            paymentData.invoice_allocations.length
+          } invoice(s)`;
+        }
+
+        if (paymentData.status === "partial") {
+          ledgerDescription += " (Partial Payment)";
+        }
+        if (paymentData.status === "pending") {
+          ledgerDescription += " (Pending Clearance)";
+        }
+
+        // Use ledgerService to create entry
+        await ledgerService.addLedgerEntry({
+          customer_id: paymentData.customer_id,
+          date: paymentData.payment_date,
+          type: "payment",
+          reference_id: payment.id,
+          reference_number: payment.payment_number,
+          debit: 0,
+          credit: paymentData.total_received,
+          description: ledgerDescription,
+        });
+
+        // Record opening balance payment if any
+        if (paymentData.opening_balance_allocation?.amount) {
+          const openingBalanceAmount =
+            paymentData.opening_balance_allocation.amount;
+          await supabase.from("ledger_entries").insert([
+            {
+              customer_id: paymentData.customer_id,
+              date: paymentData.payment_date,
+              type: "adjustment",
+              reference_id: payment.id,
+              reference_number: payment.payment_number,
+              debit: 0,
+              credit: openingBalanceAmount,
+              balance: 0,
+              description: `Opening balance payment (hidden) - ${payment.payment_number}`,
+              is_hidden: true,
+            },
+          ]);
+        }
+
+        // Update invoice balances if we have allocations
+        if (
+          paymentData.invoice_allocations &&
+          paymentData.invoice_allocations.length > 0
+        ) {
+          for (const allocation of paymentData.invoice_allocations) {
+            if (allocation.amount > 0) {
+              await invoiceService.updateInvoicePayment(
+                allocation.invoice_id,
+                allocation.amount
+              );
+            }
+          }
+        }
+
+        return payment;
+      }
+
+      return null;
+    } catch (error: any) {
+      console.error("Error in createPaymentWithManualNumber:", error);
+      throw error;
+    }
+  };
+
   const handleSubmit = async (values: any) => {
     if (totalSelectedAmount === 0) {
       message.error("Please enter a payment amount");
+      return;
+    }
+
+    if (!values.payment_number || !values.payment_number.trim()) {
+      message.error("Please enter a payment number");
       return;
     }
 
@@ -363,6 +503,7 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
       }
 
       const paymentData = {
+        payment_number: values.payment_number.trim(),
         customer_id: values.customer_id,
         payment_date: values.payment_date.format("YYYY-MM-DD"),
         total_received: totalSelectedAmount,
@@ -384,7 +525,23 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
 
       console.log("Sending payment data to service:", paymentData);
 
-      const result = await paymentService.createCustomerPayment(paymentData);
+      // Check if payment number already exists
+      const { payments: existingPayments } =
+        await paymentService.getAllPayments();
+      const isDuplicate = existingPayments.some(
+        (p: any) => p.payment_number === paymentData.payment_number
+      );
+
+      if (isDuplicate) {
+        message.error(
+          `Payment number "${paymentData.payment_number}" already exists. Please use a different number.`
+        );
+        setLoading(false);
+        return;
+      }
+
+      // Create payment with manual number
+      const result = await createPaymentWithManualNumber(paymentData);
 
       console.log("Payment creation result:", result);
 
@@ -401,7 +558,7 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
       }
     } catch (error: any) {
       console.error("Payment creation error:", error);
-      message.error("Failed to receive payment. Please try again.");
+      message.error(`Failed to receive payment: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -592,6 +749,20 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
                   </Option>
                 ))}
               </Select>
+            </Form.Item>
+
+            <Form.Item
+              name="payment_number"
+              label="Payment Number"
+              rules={[
+                { required: true, message: "Please enter payment number" },
+              ]}
+              help="Enter any payment number format (e.g., PAY-001, CHQ-2024-01, CASH-123)"
+            >
+              <Input
+                placeholder="Enter payment number"
+                style={{ width: "100%" }}
+              />
             </Form.Item>
 
             {selectedCustomer && (

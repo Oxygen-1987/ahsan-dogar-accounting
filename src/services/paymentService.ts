@@ -5,6 +5,7 @@ import type {
   PaymentStatus,
   PaymentMethod,
   PaymentAllocationFormData,
+  PaymentFormData,
 } from "../types";
 import { invoiceService } from "./invoiceService";
 import { ledgerService } from "./ledgerService";
@@ -346,6 +347,7 @@ export const paymentService = {
       // Don't throw - this shouldn't fail the whole payment
     }
   },
+
   // Add this helper function to sync existing opening balance payments
   async syncExistingOpeningBalancePayments(customerId: string): Promise<void> {
     try {
@@ -428,9 +430,11 @@ export const paymentService = {
       console.error("Error syncing:", error);
     }
   },
+
   // Create customer payment - COMPLETE UPDATED VERSION with opening balance tracking
   async createCustomerPayment(paymentData: {
     customer_id: string;
+    payment_number?: string;
     payment_date: string;
     total_received: number;
     payment_method: PaymentMethod;
@@ -773,6 +777,130 @@ export const paymentService = {
       throw new Error(
         `Payment creation failed: ${error.message || "Unknown error"}`
       );
+    }
+  },
+
+  // Update payment
+  async updatePayment(
+    paymentId: string,
+    updates: Partial<PaymentFormData>
+  ): Promise<Payment | null> {
+    try {
+      console.log("Updating payment:", { paymentId, updates });
+
+      // Get current payment data first
+      const { data: currentPayment, error: fetchError } = await supabase
+        .from("payments")
+        .select("*")
+        .eq("id", paymentId)
+        .single();
+
+      if (fetchError || !currentPayment) {
+        console.error("Error fetching current payment:", fetchError);
+        throw new Error("Payment not found");
+      }
+
+      // Prepare update data
+      const updateData: any = {
+        ...updates,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Handle cheque/parchi date logic
+      if (updates.payment_method) {
+        if (["cheque", "parchi"].includes(updates.payment_method)) {
+          // If changing to cheque/parchi and date is not provided, keep existing or set to payment date
+          if (!updates.cheque_date) {
+            updateData.cheque_date =
+              currentPayment.cheque_date ||
+              updates.payment_date ||
+              currentPayment.payment_date;
+          }
+        } else {
+          // If changing from cheque/parchi to another method, clear cheque date
+          if (["cheque", "parchi"].includes(currentPayment.payment_method)) {
+            updateData.cheque_date = null;
+          }
+        }
+      }
+
+      // Handle status logic for cheque/parchi payments
+      if (
+        updates.payment_method === "cheque" ||
+        updates.payment_method === "parchi"
+      ) {
+        // If changing to cheque/parchi and status is not provided, set to pending
+        if (!updates.status) {
+          updateData.status = "pending";
+        } else if (updates.status === "completed") {
+          // Check if cheque date is in the future
+          const chequeDate =
+            updates.cheque_date ||
+            updateData.cheque_date ||
+            currentPayment.cheque_date;
+          if (chequeDate) {
+            const chequeDateObj = dayjs(chequeDate);
+            const today = dayjs();
+
+            if (chequeDateObj.isAfter(today, "day")) {
+              throw new Error(
+                `Cannot mark cheque as completed. Cheque date (${chequeDateObj.format(
+                  "DD/MM/YYYY"
+                )}) is in the future.`
+              );
+            }
+          }
+        }
+      }
+
+      // Update the payment
+      const { data: payment, error } = await supabase
+        .from("payments")
+        .update(updateData)
+        .eq("id", paymentId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error updating payment:", error);
+        throw error;
+      }
+
+      // Also need to update the ledger entry if payment date or amount changed
+      if (updates.payment_date || updates.total_received) {
+        try {
+          // First remove the old ledger entry
+          await ledgerService.removeLedgerEntry(paymentId, "payment");
+
+          // Create new ledger entry with updated values
+          await ledgerService.addLedgerEntry({
+            customer_id: payment.customer_id,
+            date: updates.payment_date || payment.payment_date,
+            type: "payment",
+            reference_id: paymentId,
+            reference_number: payment.payment_number,
+            debit: 0,
+            credit: updates.total_received || payment.total_received,
+            description: `Payment ${payment.payment_number} updated`,
+          });
+        } catch (ledgerError) {
+          console.error("Error updating ledger entry:", ledgerError);
+        }
+      }
+
+      // Get allocations
+      const { data: allocations } = await supabase
+        .from("payment_allocations")
+        .select("*")
+        .eq("payment_id", paymentId);
+
+      return {
+        ...payment,
+        allocations: allocations || [],
+      };
+    } catch (error) {
+      console.error("Error in updatePayment:", error);
+      throw error;
     }
   },
 

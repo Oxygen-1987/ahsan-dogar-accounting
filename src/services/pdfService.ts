@@ -526,16 +526,35 @@ export const pdfService = {
           textX = xPos + cellWidth / 2;
         }
 
-        // Set font style and color
-        doc.setFontSize(12); // Increased font size
-        if (isNumeric && cell !== "-") {
-          doc.setFont("helvetica", "bold"); // Bold for numeric values
-          doc.setTextColor(60, 60, 60);
+        // Set font style and color - UPDATED FOR DEBIT/CREDIT COLORS
+        doc.setFontSize(12);
+        if (colIndex === 3) {
+          // Debit column
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(231, 76, 60); // Red for debits
+        } else if (colIndex === 4) {
+          // Credit column
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(39, 174, 96); // Green for credits
+        } else if (colIndex === 5) {
+          // Balance column
+          doc.setFont("helvetica", "bold");
+          // Determine color based on balance value
+          const balanceValue = row[5]; // Get the balance value from the row
+          const isNegative =
+            typeof balanceValue === "string"
+              ? balanceValue.includes("CR")
+              : balanceValue < 0;
+          if (isNegative) {
+            doc.setTextColor(231, 76, 60); // Red for negative/CR balance
+          } else {
+            doc.setTextColor(39, 174, 96); // Green for positive balance
+          }
         } else if (colIndex === 0 || colIndex === 1) {
-          doc.setFont("helvetica", "bold"); // Bold for # and Date
+          doc.setFont("helvetica", "bold");
           doc.setTextColor(100, 100, 100);
         } else if (colIndex === 2) {
-          doc.setFont("helvetica", "bold"); // Bold for Description
+          doc.setFont("helvetica", "bold");
           doc.setTextColor(60, 60, 60);
         } else {
           doc.setFont("helvetica", "normal");
@@ -545,7 +564,6 @@ export const pdfService = {
         // Process cell content
         let displayText = cell.toString();
         if (colIndex === 1 && displayText.length === 10) {
-          // Ensure date is fully visible (DD/MM/YYYY)
           displayText = displayText;
         }
         if (colIndex === 2 && displayText.length > 65) {
@@ -622,22 +640,21 @@ export const pdfService = {
     xPos += columnWidths[0] + columnWidths[1];
 
     // Draw "TOTALS" label in Description column
-    doc.setFontSize(12); // Increased font size
+    doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(60, 60, 60);
-    doc.text("TOTALS", xPos + 5, startY + 8, { align: "left" }); // Reduced padding
-
-    // Move to Debit column (skip Description column)
+    doc.text("TOTALS", xPos + 5, startY + 8, { align: "left" });
     xPos += columnWidths[2];
-
-    // Draw total debits
     const debitText = this.formatCurrencyFull(totalDebits, false);
     doc.text(debitText, xPos + columnWidths[3] - 6, startY + 8, {
       align: "right",
     });
 
-    // Draw total credits
+    // Draw total credits - UPDATED FOR GREEN COLOR
     xPos += columnWidths[3];
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(39, 174, 96); // Green for credits
     const creditText = this.formatCurrencyFull(totalCredits, false);
     doc.text(creditText, xPos + columnWidths[4] - 6, startY + 8, {
       align: "right",
