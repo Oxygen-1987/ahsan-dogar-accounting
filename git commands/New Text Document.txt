@@ -1,0 +1,17 @@
+📱 Save This Cheat Sheet
+For updating everything:
+
+bash
+git add .                    # Stage all changes
+git commit -m "Your message" # Commit
+git push origin main         # Deploy
+For checking then updating:
+
+bash
+git status                   # See changes
+git add .                    # Stage all
+git commit -m "Update"       # Commit  
+git push                     # Deploy
+
+
+https://ahsan-dogar-accounting.vercel.app/

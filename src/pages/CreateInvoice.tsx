@@ -215,8 +215,9 @@ const CreateInvoice: React.FC = () => {
 
   // Set predicted invoice number for new invoices
   useEffect(() => {
-    if (!id && !isEditMode) {
+    if (!id && !isEditMode && !invoiceNumber) {
       predictNextInvoiceNumber().then((predictedNumber) => {
+        // Set initial value but allow manual override
         setInvoiceNumber(predictedNumber);
         form.setFieldValue("invoice_number", predictedNumber);
       });
@@ -326,6 +327,7 @@ const CreateInvoice: React.FC = () => {
         customer_id: values.customer_id,
         issue_date: values.issue_date.format("YYYY-MM-DD"),
         due_date: values.issue_date.format("YYYY-MM-DD"), // Same as issue date
+        invoice_number: values.invoice_number, // Add this line - get from form
         term: "due_on_receipt", // Default term
         line_items: lineItems,
         notes: values.notes,
@@ -335,8 +337,8 @@ const CreateInvoice: React.FC = () => {
       let result: Invoice;
 
       if (isEditMode && currentInvoice) {
-        // For editing
-        invoiceData.invoice_number = currentInvoice.invoice_number;
+        // For editing - use the form value for invoice number
+        invoiceData.invoice_number = values.invoice_number; // Changed from currentInvoice.invoice_number
         result = await invoiceService.updateInvoice(
           currentInvoice.id,
           invoiceData
@@ -367,14 +369,13 @@ const CreateInvoice: React.FC = () => {
         ]);
         setSelectedCustomer(null);
         setCurrentInvoice(null);
+        setInvoiceNumber(""); // Clear invoice number
 
-        // Predict next invoice number
-        const nextNumber = await predictNextInvoiceNumber();
-        setInvoiceNumber(nextNumber);
+        // Set default form values
         form.setFieldsValue({
-          invoice_number: nextNumber,
           issue_date: dayjs(),
         });
+        // Don't auto-fill invoice number - let user enter manually
       } else if (action === "save_and_close") {
         navigate("/invoices");
       }
@@ -858,10 +859,11 @@ const CreateInvoice: React.FC = () => {
       render: (_, record) => (
         <InputNumber
           min={0}
-          step={0.01}
+          step={1}
           value={record.inches}
           onChange={(value) => updateLineItem(record.id, "inches", value || 0)}
           style={{ width: "100%" }}
+          precision={0} // No decimal places
         />
       ),
     },
@@ -873,17 +875,18 @@ const CreateInvoice: React.FC = () => {
       render: (_, record) => (
         <InputNumber
           min={0}
-          step={0.01}
+          step={1}
           value={record.rate}
           onChange={(value) => updateLineItem(record.id, "rate", value || 0)}
           style={{ width: "100%" }}
+          precision={0} // No decimal places
           formatter={(value) => {
             if (!value) return "0";
             const num = parseFloat(value.toString());
             if (isNaN(num)) return "0";
             return num.toLocaleString("en-PK", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
+              minimumFractionDigits: 0,
+              maximumFractionDigits: 0,
             });
           }}
           parser={(value) => {
@@ -900,17 +903,18 @@ const CreateInvoice: React.FC = () => {
       render: (_, record) => (
         <InputNumber
           min={0}
-          step={0.01}
+          step={1}
           value={record.amount}
           onChange={(value) => updateLineItem(record.id, "amount", value || 0)}
           style={{ width: "100%" }}
+          precision={0} // No decimal places
           formatter={(value) => {
             if (!value) return "0";
             const num = parseFloat(value.toString());
             if (isNaN(num)) return "0";
             return num.toLocaleString("en-PK", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
+              minimumFractionDigits: 0,
+              maximumFractionDigits: 0,
             });
           }}
           parser={(value) => {
@@ -1180,20 +1184,15 @@ const CreateInvoice: React.FC = () => {
                     name="invoice_number"
                     rules={[
                       { required: true, message: "Invoice number is required" },
-                      {
-                        pattern: /^INV-.+/,
-                        message: "Invoice number must start with INV-",
-                      },
                     ]}
                   >
                     <Input
-                      prefix="INV-"
-                      placeholder="Enter number after INV-"
-                      value={invoiceNumber?.replace(/^INV-/, "")}
+                      placeholder="Enter invoice number"
+                      value={invoiceNumber}
                       onChange={(e) => {
-                        const newNumber = `INV-${e.target.value}`;
-                        setInvoiceNumber(newNumber);
-                        form.setFieldValue("invoice_number", newNumber);
+                        const value = e.target.value;
+                        setInvoiceNumber(value);
+                        form.setFieldValue("invoice_number", value);
                       }}
                     />
                   </Form.Item>
@@ -1203,7 +1202,8 @@ const CreateInvoice: React.FC = () => {
                     label="Invoice Date"
                     name="issue_date"
                     rules={[
-                      { required: true, message: "Please select invoice date" },
+                      { required: true, message: "Invoice number is required" },
+                      // Removed pattern validation completely
                     ]}
                   >
                     <DatePicker format="DD/MM/YYYY" style={{ width: "100%" }} />
