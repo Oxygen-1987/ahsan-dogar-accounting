@@ -66,7 +66,7 @@ export const pdfService = {
       );
 
       // Add report title
-      doc.setFontSize(16);
+      doc.setFontSize(18); // Increased font size
       doc.setFont("helvetica", "bold");
       doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
       doc.text("CUSTOMER LEDGER STATEMENT", pageWidth / 2, 25, {
@@ -76,12 +76,12 @@ export const pdfService = {
       // Add customer information section
       const customerY = 32;
 
-      doc.setFontSize(10);
+      doc.setFontSize(12); // Increased font size
       doc.setFont("helvetica", "bold");
       doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
       doc.text("CUSTOMER INFORMATION", margin, customerY);
 
-      doc.setFontSize(9);
+      doc.setFontSize(11); // Increased font size
       doc.setFont("helvetica", "normal");
       doc.setTextColor(60, 60, 60);
 
@@ -113,7 +113,7 @@ export const pdfService = {
 
       // Add period and generation info on right side
       const infoY = customerY;
-      doc.setFontSize(9);
+      doc.setFontSize(11); // Increased font size
       doc.setFont("helvetica", "normal");
       doc.setTextColor(100, 100, 100);
 
@@ -176,24 +176,32 @@ export const pdfService = {
           (index + 1).toString(),
           dayjs(entry.date).format("DD/MM/YYYY"),
           description,
-          entry.debit > 0 ? this.formatCurrencyFull(entry.debit) : "-",
-          entry.credit > 0 ? this.formatCurrencyFull(entry.credit) : "-",
-          this.formatCurrencyFull(entry.balance),
+          entry.debit > 0 ? this.formatCurrencyFull(entry.debit, false) : "-",
+          entry.credit > 0 ? this.formatCurrencyFull(entry.credit, false) : "-",
+          this.formatCurrencyFull(entry.balance, true),
         ];
       });
 
-      // Define table columns - REMOVED Type column
+      // Define table columns - REMOVED "Type" column, updated header text
       const headers = [
         "#",
         "Date",
         "Description",
-        "Debit (PKR)",
-        "Credit (PKR)",
-        "Balance (PKR)",
+        "Debit",
+        "Credit",
+        "Balance",
       ];
 
-      // Fixed column widths for landscape - REMOVED Type column width
-      const columnWidths = [10, 25, 120, 40, 40, 42]; // Total: 277mm
+      // Fixed column widths for landscape - Updated for new layout
+      const availableWidth = pageWidth - margin * 2;
+      const columnWidths = [
+        15, // # (increased for better spacing)
+        35, // Date (increased to ensure full date visibility)
+        availableWidth - (15 + 35 + 45 + 45 + 50), // Description (dynamic width)
+        45, // Debit
+        45, // Credit
+        50, // Balance
+      ];
 
       // Draw professional table in landscape
       let currentY = this.drawLandscapeTable(
@@ -230,7 +238,7 @@ export const pdfService = {
         doc.line(margin, pageHeight - 15, pageWidth - margin, pageHeight - 15);
 
         // Footer text
-        doc.setFontSize(8);
+        doc.setFontSize(9); // Increased font size
         doc.setFont("helvetica", "normal");
         doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
 
@@ -265,7 +273,7 @@ export const pdfService = {
     doc.rect(0, 0, pageWidth, 20, "F");
 
     // Company name
-    doc.setFontSize(14);
+    doc.setFontSize(16); // Increased font size
     doc.setFont("helvetica", "bold");
     doc.setTextColor(255, 255, 255);
     doc.text(
@@ -291,11 +299,11 @@ export const pdfService = {
     colors: any
   ): void {
     const boxWidth = (contentWidth - 15) / 4;
-    const boxHeight = 18;
+    const boxHeight = 20; // Increased height
     const spacing = 5;
 
     // Title
-    doc.setFontSize(11);
+    doc.setFontSize(12); // Increased font size
     doc.setFont("helvetica", "bold");
     doc.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
     doc.text("LEDGER SUMMARY", margin, startY - 3);
@@ -340,25 +348,25 @@ export const pdfService = {
       doc.rect(x, y, 4, boxHeight, "F");
 
       // Title
-      doc.setFontSize(8);
+      doc.setFontSize(11); // Increased font size
       doc.setFont("helvetica", "bold");
       doc.setTextColor(100, 100, 100);
 
       // Wrap long titles
       const titleLines = doc.splitTextToSize(box.title, boxWidth - 10);
-      doc.text(titleLines, x + boxWidth / 2, y + 5, { align: "center" });
+      doc.text(titleLines, x + boxWidth / 2, y + 6, { align: "center" });
 
       // Value with full amount
-      doc.setFontSize(9);
+      doc.setFontSize(11); // Increased font size
       doc.setFont("helvetica", "bold");
       doc.setTextColor(60, 60, 60);
-      const formattedValue = this.formatCurrencyFull(box.value);
-      const valueY = y + (box.title.includes("BALANCE") ? 12 : 11);
+      const formattedValue = this.formatCurrencyFull(box.value, true);
+      const valueY = y + (box.title.includes("BALANCE") ? 14 : 13);
       doc.text(formattedValue, x + boxWidth / 2, valueY, { align: "center" });
     });
   },
 
-  // Draw professional table for landscape with increased font - UPDATED for removed Type column
+  // Draw professional table for landscape with increased font - UPDATED
   drawLandscapeTable(
     doc: jsPDF,
     headers: string[],
@@ -369,8 +377,8 @@ export const pdfService = {
     primaryColor: number[],
     pageHeight: number
   ): number {
-    const rowHeight = 9;
-    const headerHeight = 11;
+    const rowHeight = 10; // Increased row height
+    const headerHeight = 12; // Increased header height
     let currentY = startY;
     const totalWidth = columnWidths.reduce((sum, w) => sum + w, 0);
 
@@ -384,7 +392,7 @@ export const pdfService = {
     doc.rect(startX, startY, totalWidth, headerHeight, "F");
 
     // Draw header text
-    doc.setFontSize(11);
+    doc.setFontSize(14); // Increased font size
     doc.setFont("helvetica", "bold");
     doc.setTextColor(255, 255, 255);
 
@@ -397,7 +405,7 @@ export const pdfService = {
         : index === 0 || index === 1
         ? "center"
         : "left";
-      const padding = 5;
+      const padding = 6; // Increased padding
 
       let textX = xPos + padding;
       if (isNumeric) {
@@ -407,7 +415,7 @@ export const pdfService = {
       }
 
       const headerText = doc.splitTextToSize(header, cellWidth - padding * 2);
-      doc.text(headerText, textX, startY + 7, { align: align as any });
+      doc.text(headerText, textX, startY + 8, { align: align as any });
 
       // DRAW VERTICAL LINES BETWEEN HEADER COLUMNS
       if (index < headers.length - 1) {
@@ -444,7 +452,7 @@ export const pdfService = {
         doc.rect(startX, currentY, totalWidth, headerHeight, "F");
 
         xPos = startX;
-        doc.setFontSize(11);
+        doc.setFontSize(12);
         doc.setFont("helvetica", "bold");
         doc.setTextColor(255, 255, 255);
 
@@ -456,7 +464,7 @@ export const pdfService = {
             : index === 0 || index === 1
             ? "center"
             : "left";
-          const padding = 5;
+          const padding = 6;
 
           let textX = xPos + padding;
           if (isNumeric) {
@@ -469,7 +477,7 @@ export const pdfService = {
             header,
             cellWidth - padding * 2
           );
-          doc.text(headerText, textX, currentY + 7, { align: align as any });
+          doc.text(headerText, textX, currentY + 8, { align: align as any });
 
           // DRAW VERTICAL LINES BETWEEN HEADER COLUMNS ON NEW PAGE
           if (index < headers.length - 1) {
@@ -509,7 +517,7 @@ export const pdfService = {
           : colIndex === 0 || colIndex === 1
           ? "center"
           : "left";
-        const padding = 5;
+        const padding = 6;
 
         let textX = xPos + padding;
         if (isNumeric) {
@@ -519,13 +527,16 @@ export const pdfService = {
         }
 
         // Set font style and color
-        doc.setFontSize(9);
+        doc.setFontSize(12); // Increased font size
         if (isNumeric && cell !== "-") {
-          doc.setFont("helvetica", "bold");
+          doc.setFont("helvetica", "bold"); // Bold for numeric values
           doc.setTextColor(60, 60, 60);
         } else if (colIndex === 0 || colIndex === 1) {
-          doc.setFont("helvetica", "normal");
+          doc.setFont("helvetica", "bold"); // Bold for # and Date
           doc.setTextColor(100, 100, 100);
+        } else if (colIndex === 2) {
+          doc.setFont("helvetica", "bold"); // Bold for Description
+          doc.setTextColor(60, 60, 60);
         } else {
           doc.setFont("helvetica", "normal");
           doc.setTextColor(60, 60, 60);
@@ -533,8 +544,12 @@ export const pdfService = {
 
         // Process cell content
         let displayText = cell.toString();
-        if (colIndex === 2 && displayText.length > 70) {
-          displayText = displayText.substring(0, 70) + "...";
+        if (colIndex === 1 && displayText.length === 10) {
+          // Ensure date is fully visible (DD/MM/YYYY)
+          displayText = displayText;
+        }
+        if (colIndex === 2 && displayText.length > 65) {
+          displayText = displayText.substring(0, 65) + "...";
         }
 
         const textLines = doc.splitTextToSize(
@@ -543,7 +558,7 @@ export const pdfService = {
         );
 
         if (textLines.length > 0) {
-          doc.text(textLines[0], textX, currentY + 6, {
+          doc.text(textLines[0], textX, currentY + 7, {
             align: align as any,
             maxWidth: cellWidth - padding * 2,
           });
@@ -576,7 +591,7 @@ export const pdfService = {
     return currentY;
   },
 
-  // Add totals row for landscape with closing balance - UPDATED for removed Type column
+  // Add totals row for landscape with closing balance
   addLandscapeTotalsRow(
     doc: jsPDF,
     entries: LedgerEntry[],
@@ -588,7 +603,7 @@ export const pdfService = {
   ): void {
     const totalDebits = entries.reduce((sum, entry) => sum + entry.debit, 0);
     const totalCredits = entries.reduce((sum, entry) => sum + entry.credit, 0);
-    const rowHeight = 10;
+    const rowHeight = 12; // Increased row height
     const totalWidth = columnWidths.reduce((sum, width) => sum + width, 0);
 
     // Draw totals row background
@@ -600,37 +615,37 @@ export const pdfService = {
     doc.setLineWidth(0.3);
     doc.rect(startX, startY, totalWidth, rowHeight, "D");
 
-    // Calculate column positions - UPDATED for removed Type column
+    // Calculate column positions
     let xPos = startX;
 
-    // Skip first 2 columns (#, Date) for "TOTALS" label (removed Type column)
+    // Skip first 2 columns (#, Date) for "TOTALS" label
     xPos += columnWidths[0] + columnWidths[1];
 
     // Draw "TOTALS" label in Description column
-    doc.setFontSize(10); // Increased font size
+    doc.setFontSize(12); // Increased font size
     doc.setFont("helvetica", "bold");
     doc.setTextColor(60, 60, 60);
-    doc.text("TOTALS", xPos + 10, startY + 6.5, { align: "left" });
+    doc.text("TOTALS", xPos + 5, startY + 8, { align: "left" }); // Reduced padding
 
     // Move to Debit column (skip Description column)
     xPos += columnWidths[2];
 
     // Draw total debits
-    const debitText = this.formatCurrencyFull(totalDebits);
-    doc.text(debitText, xPos + columnWidths[3] - 5, startY + 6.5, {
+    const debitText = this.formatCurrencyFull(totalDebits, false);
+    doc.text(debitText, xPos + columnWidths[3] - 6, startY + 8, {
       align: "right",
     });
 
     // Draw total credits
     xPos += columnWidths[3];
-    const creditText = this.formatCurrencyFull(totalCredits);
-    doc.text(creditText, xPos + columnWidths[4] - 5, startY + 6.5, {
+    const creditText = this.formatCurrencyFull(totalCredits, false);
+    doc.text(creditText, xPos + columnWidths[4] - 6, startY + 8, {
       align: "right",
     });
 
     // Draw final balance
     xPos += columnWidths[4];
-    const balanceText = this.formatCurrencyFull(closingBalance);
+    const balanceText = this.formatCurrencyFull(closingBalance, true);
 
     // Highlight final balance with different background
     doc.setFillColor(220, 220, 220);
@@ -638,17 +653,18 @@ export const pdfService = {
     doc.setDrawColor(180, 180, 180);
     doc.rect(xPos, startY, columnWidths[5], rowHeight, "D");
 
-    doc.setFontSize(10);
+    doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-    doc.text(balanceText, xPos + columnWidths[5] - 5, startY + 6.5, {
+    doc.text(balanceText, xPos + columnWidths[5] - 6, startY + 8, {
       align: "right",
     });
   },
 
   // Helper to format currency with full amount (no abbreviations)
-  formatCurrencyFull(amount: number): string {
-    if (amount === 0) return "PKR 0.00";
+  // Added includePKR parameter to control whether to include "PKR" prefix
+  formatCurrencyFull(amount: number, includePKR: boolean = true): string {
+    if (amount === 0) return includePKR ? "PKR 0.00" : "0.00";
 
     const isNegative = amount < 0;
     const absAmount = Math.abs(amount);
@@ -659,7 +675,7 @@ export const pdfService = {
       maximumFractionDigits: 2,
     });
 
-    return `PKR ${formatted}${isNegative ? " CR" : ""}`;
+    return `${includePKR ? "PKR " : ""}${formatted}${isNegative ? " CR" : ""}`;
   },
 
   // Generate PDF and download

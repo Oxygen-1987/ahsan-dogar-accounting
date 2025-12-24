@@ -35,17 +35,17 @@ interface ReceivePaymentModalProps {
   visible: boolean;
   onCancel: () => void;
   onSuccess: () => void;
-  customer?: Customer | null; // Add customer prop
+  customer?: Customer | null;
 }
 
 const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
   visible,
   onCancel,
   onSuccess,
-  customer, // Destructure the customer prop
+  customer,
 }) => {
   const [form] = Form.useForm();
-  const { message } = App.useApp(); // Get message from App context
+  const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(
@@ -58,17 +58,21 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
   const [totalSelectedAmount, setTotalSelectedAmount] = useState(0);
   const [totalPendingAmount, setTotalPendingAmount] = useState(0);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
+  const [openingBalance, setOpeningBalance] = useState<{
+    amount: number;
+    date: string;
+    isPositive: boolean;
+    remaining: number;
+  }>({ amount: 0, date: "", isPositive: true, remaining: 0 });
+  const [openingBalanceAllocation, setOpeningBalanceAllocation] =
+    useState<number>(0);
 
-  // Reset and auto-select when modal opens
   useEffect(() => {
     if (visible) {
       console.log("Modal opened - resetting all data");
-      console.log("Customer prop received:", customer);
-
       resetModal();
       loadCustomers();
 
-      // If customer prop is provided, auto-select it after customers are loaded
       if (customer) {
         console.log(
           "Customer provided, will auto-select:",
@@ -76,32 +80,17 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
         );
       }
     }
-  }, [visible]); // Only depend on visible
+  }, [visible]);
 
-  // Auto-select customer when customers are loaded
   useEffect(() => {
     if (visible && customer && customers.length > 0) {
-      console.log("Customers loaded, auto-selecting:", customer.company_name);
-
-      // Find the customer in the loaded list
       const foundCustomer = customers.find((c) => c.id === customer.id);
       if (foundCustomer) {
-        console.log("Found customer in list:", foundCustomer.company_name);
-
-        // Set form value
         form.setFieldsValue({
           customer_id: foundCustomer.id,
         });
-
-        // Set selected customer state
         setSelectedCustomer(foundCustomer);
-
-        // Load this customer's invoices
-        loadCustomerInvoices(foundCustomer.id);
-
-        console.log("Customer auto-selected successfully");
-      } else {
-        console.warn("Customer not found in customers list:", customer.id);
+        handleCustomerLoad(foundCustomer.id);
       }
     }
   }, [visible, customers, customer, form]);
@@ -113,8 +102,8 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
     setSelectedInvoices({});
     setTotalSelectedAmount(0);
     setTotalPendingAmount(0);
-
-    // Set default form values
+    setOpeningBalance({ amount: 0, date: "", isPositive: true, remaining: 0 });
+    setOpeningBalanceAllocation(0);
     form.setFieldsValue({
       payment_date: dayjs(),
       payment_method: "cash",
@@ -123,13 +112,59 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
 
   const loadCustomers = async () => {
     try {
-      console.log("Loading customers...");
       const result = await customerService.getAllCustomers();
       setCustomers(result.customers);
-      console.log("Customers loaded:", result.customers.length);
     } catch (error) {
       console.error("Failed to load customers:", error);
       message.error("Failed to load customers");
+    }
+  };
+
+  const handleCustomerLoad = async (customerId: string) => {
+    try {
+      console.log("Loading customer data for:", customerId);
+
+      // Get opening balance with paid/remaining amounts
+      const openingBalanceData = await paymentService.getCustomerOpeningBalance(
+        customerId
+      );
+      console.log("Opening balance data:", openingBalanceData);
+
+      // Get customer invoices
+      const customerPendingInvoices =
+        await invoiceService.getCustomerPendingInvoices(customerId);
+      console.log("Customer invoices:", customerPendingInvoices);
+
+      setCustomerInvoices(customerPendingInvoices);
+      setOpeningBalance({
+        amount: openingBalanceData.amount,
+        date: openingBalanceData.date,
+        isPositive: openingBalanceData.isPositive,
+        remaining: openingBalanceData.remainingAmount,
+      });
+
+      // Calculate total pending (invoices + remaining opening balance)
+      const invoicePending = customerPendingInvoices.reduce(
+        (sum, inv) => sum + (inv.pending_amount || 0),
+        0
+      );
+      const totalPending = invoicePending + openingBalanceData.remainingAmount;
+
+      console.log("Total pending calculation:", {
+        invoicePending,
+        remainingOpeningBalance: openingBalanceData.remainingAmount,
+        totalPending,
+      });
+
+      setTotalPendingAmount(totalPending);
+      setSelectedInvoices({});
+      setTotalSelectedAmount(0);
+      setOpeningBalanceAllocation(0);
+    } catch (error) {
+      console.error("Error in handleCustomerLoad:", error);
+      message.error("Failed to load customer data");
+      setCustomerInvoices([]);
+      setTotalPendingAmount(0);
     }
   };
 
@@ -142,65 +177,28 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
       setTotalPendingAmount(0);
       setSelectedInvoices({});
       setTotalSelectedAmount(0);
+      setOpeningBalance({
+        amount: 0,
+        date: "",
+        isPositive: true,
+        remaining: 0,
+      });
+      setOpeningBalanceAllocation(0);
       return;
     }
 
     try {
       const customer = customers.find((c) => c.id === customerId);
-      console.log("Found customer:", customer);
       setSelectedCustomer(customer || null);
 
       if (customerId) {
-        await loadCustomerInvoices(customerId);
+        setLoadingInvoices(true);
+        await handleCustomerLoad(customerId);
+        setLoadingInvoices(false);
       }
     } catch (error) {
       console.error("Error in handleCustomerChange:", error);
       message.error("Failed to load customer data");
-    }
-  };
-
-  const loadCustomerInvoices = async (customerId: string) => {
-    setLoadingInvoices(true);
-    try {
-      console.log("Loading invoices for customer:", customerId);
-      const customerPendingInvoices =
-        await invoiceService.getCustomerPendingInvoices(customerId);
-
-      console.log("Loaded invoices:", customerPendingInvoices);
-
-      setCustomerInvoices(customerPendingInvoices);
-
-      // Calculate total pending amount
-      const totalPending = customerPendingInvoices.reduce(
-        (sum, inv) => sum + (inv.pending_amount || 0),
-        0
-      );
-      setTotalPendingAmount(totalPending);
-
-      setSelectedInvoices({});
-      setTotalSelectedAmount(0);
-
-      console.log("Total pending amount:", totalPending);
-
-      // Auto-fill payment amount with total pending or customer's current balance
-      const customer = customers.find((c) => c.id === customerId);
-      if (customer) {
-        const suggestedAmount = Math.min(
-          customer.current_balance || 0,
-          totalPending
-        );
-        if (suggestedAmount > 0) {
-          setTotalSelectedAmount(suggestedAmount);
-          // Auto-apply FIFO
-          applyFIFO(suggestedAmount);
-        }
-      }
-    } catch (error) {
-      console.error("Error loading customer invoices:", error);
-      message.error("Failed to load customer invoices");
-      setCustomerInvoices([]);
-      setTotalPendingAmount(0);
-    } finally {
       setLoadingInvoices(false);
     }
   };
@@ -212,7 +210,31 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
 
     const newSelectedInvoices: { [key: string]: number } = {};
     let remainingAmount = amountToAllocate || totalSelectedAmount;
+    let openingBalanceApplied = 0;
 
+    console.log("Applying FIFO with:", {
+      amountToAllocate,
+      remainingAmount,
+      openingBalanceRemaining: openingBalance.remaining,
+      isPositive: openingBalance.isPositive,
+      invoiceCount: sortedInvoices.length,
+    });
+
+    // FIRST: Apply to REMAINING opening balance if it's positive
+    if (
+      openingBalance.isPositive &&
+      openingBalance.remaining > 0 &&
+      remainingAmount > 0
+    ) {
+      const amountToApply = Math.min(openingBalance.remaining, remainingAmount);
+      openingBalanceApplied = amountToApply;
+      remainingAmount -= amountToApply;
+      console.log(
+        `Applied ${amountToApply} to opening balance (remaining: ${openingBalance.remaining}), leftover: ${remainingAmount}`
+      );
+    }
+
+    // THEN: Apply to invoices in FIFO order
     for (const invoice of sortedInvoices) {
       if (remainingAmount <= 0) break;
 
@@ -220,21 +242,31 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
       if (amountToApply > 0) {
         newSelectedInvoices[invoice.id] = amountToApply;
         remainingAmount -= amountToApply;
+        console.log(
+          `Applied ${amountToApply} to invoice ${invoice.invoice_number}, remaining: ${remainingAmount}`
+        );
       }
     }
 
     setSelectedInvoices(newSelectedInvoices);
+    setOpeningBalanceAllocation(openingBalanceApplied);
 
     // Update total selected amount
-    const newTotal = Object.values(newSelectedInvoices).reduce(
-      (sum, amt) => sum + amt,
-      0
-    );
+    const newTotal =
+      openingBalanceApplied +
+      Object.values(newSelectedInvoices).reduce((sum, amt) => sum + amt, 0);
     setTotalSelectedAmount(newTotal);
+
+    console.log("FIFO application complete:", {
+      openingBalanceApplied,
+      invoiceAllocations: Object.keys(newSelectedInvoices).length,
+      newTotal,
+    });
   };
 
   const handleTotalAmountChange = (totalAmount: number) => {
     const amount = totalAmount || 0;
+    console.log("Total amount changed to:", amount);
     setTotalSelectedAmount(amount);
 
     // If total amount changes, clear existing allocations and reapply FIFO
@@ -242,6 +274,7 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
       applyFIFO(amount);
     } else {
       setSelectedInvoices({});
+      setOpeningBalanceAllocation(0);
     }
   };
 
@@ -264,11 +297,26 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
 
     setSelectedInvoices(newSelectedInvoices);
 
-    // Calculate total
-    const total = Object.values(newSelectedInvoices).reduce(
+    // Calculate total (opening balance allocation + invoice allocations)
+    const invoiceTotal = Object.values(newSelectedInvoices).reduce(
       (sum, amt) => sum + amt,
       0
     );
+    const total = openingBalanceAllocation + invoiceTotal;
+    setTotalSelectedAmount(total);
+  };
+
+  const handleOpeningBalanceChange = (amount: number) => {
+    const maxAmount = openingBalance.isPositive ? openingBalance.remaining : 0;
+    const actualAmount = Math.min(Math.max(0, amount), maxAmount);
+    setOpeningBalanceAllocation(actualAmount);
+
+    // Recalculate total
+    const invoiceTotal = Object.values(selectedInvoices).reduce(
+      (sum, amt) => sum + amt,
+      0
+    );
+    const total = actualAmount + invoiceTotal;
     setTotalSelectedAmount(total);
   };
 
@@ -279,12 +327,12 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
     }
 
     console.log("Form values:", values);
+    console.log("Opening balance allocation:", openingBalanceAllocation);
     console.log("Selected invoices:", selectedInvoices);
     console.log("Total selected amount:", totalSelectedAmount);
 
     setLoading(true);
     try {
-      // Determine payment status based on payment method
       let paymentStatus: PaymentStatus = "completed";
 
       if (
@@ -294,7 +342,6 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
         paymentStatus = "pending";
       }
 
-      // Prepare invoice allocations array
       const invoiceAllocations = Object.entries(selectedInvoices)
         .filter(([_, amount]) => amount > 0)
         .map(([invoiceId, amount]) => ({
@@ -302,9 +349,19 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
           amount: amount,
         }));
 
-      console.log("Invoice allocations:", invoiceAllocations);
+      console.log("All allocations:", {
+        openingBalance: openingBalanceAllocation,
+        invoiceAllocations,
+        totalSelectedAmount,
+      });
 
-      // Create payment data
+      // Prepare payment notes
+      let paymentNotes = values.notes || "";
+      if (openingBalanceAllocation > 0) {
+        if (paymentNotes) paymentNotes += "\n";
+        paymentNotes += `PKR ${openingBalanceAllocation.toLocaleString()} paid against opening balance.`;
+      }
+
       const paymentData = {
         customer_id: values.customer_id,
         payment_date: values.payment_date.format("YYYY-MM-DD"),
@@ -314,8 +371,15 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
         bank_name: values.bank_name || undefined,
         cheque_date: values.cheque_date?.format("YYYY-MM-DD") || undefined,
         status: paymentStatus,
-        notes: values.notes || undefined,
+        notes: paymentNotes.trim(),
         invoice_allocations: invoiceAllocations,
+        opening_balance_allocation:
+          openingBalanceAllocation > 0
+            ? {
+                amount: openingBalanceAllocation,
+                date: openingBalance.date,
+              }
+            : undefined,
       };
 
       console.log("Sending payment data to service:", paymentData);
@@ -335,7 +399,7 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
       } else {
         throw new Error("Payment creation failed");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Payment creation error:", error);
       message.error("Failed to receive payment. Please try again.");
     } finally {
@@ -344,7 +408,6 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
   };
 
   const handlePaymentMethodChange = (method: PaymentMethod) => {
-    // Reset related fields when payment method changes
     if (method !== "cheque") {
       form.setFieldsValue({
         bank_name: undefined,
@@ -358,25 +421,68 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
     }
   };
 
+  const paymentDistributionData = [
+    ...(openingBalance.isPositive && openingBalance.remaining > 0
+      ? [
+          {
+            id: "opening_balance",
+            isOpeningBalance: true,
+            description: `Opening Balance (${dayjs(openingBalance.date).format(
+              "DD/MM/YYYY"
+            )})`,
+            pending_amount: openingBalance.remaining,
+            allocation: openingBalanceAllocation,
+          },
+        ]
+      : []),
+    ...customerInvoices.map((invoice) => ({
+      ...invoice,
+      isOpeningBalance: false,
+      allocation: selectedInvoices[invoice.id] || 0,
+    })),
+  ];
+
   const invoiceColumns = [
     {
-      title: "Invoice Number",
-      dataIndex: "invoice_number",
-      key: "invoice_number",
-      render: (text: string) => <strong>{text}</strong>,
-    },
-    {
-      title: "Due Date",
-      dataIndex: "due_date",
-      key: "due_date",
-      render: (date: string) => dayjs(date).format("DD/MM/YYYY"),
+      title: "Description",
+      dataIndex: "description",
+      key: "description",
+      render: (text: string, record: any) => (
+        <div>
+          {record.isOpeningBalance ? (
+            <div>
+              <strong style={{ color: "#faad14" }}>{text}</strong>
+              <div style={{ fontSize: "12px", color: "#666" }}>
+                Opening Balance (Remaining)
+              </div>
+            </div>
+          ) : (
+            <div>
+              <strong>{record.invoice_number}</strong>
+              <div style={{ fontSize: "12px", color: "#666" }}>
+                Due: {dayjs(record.due_date).format("DD/MM/YYYY")}
+                {record.status === "partial" && (
+                  <div style={{ color: "#fa8c16", fontSize: "11px" }}>
+                    Partial Payment Applied
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      ),
     },
     {
       title: "Pending Amount",
       dataIndex: "pending_amount",
       key: "pending_amount",
-      render: (amount: number) => (
-        <span style={{ fontWeight: "bold" }}>
+      render: (amount: number, record: any) => (
+        <span
+          style={{
+            fontWeight: "bold",
+            color: record.isOpeningBalance ? "#faad14" : "#000",
+          }}
+        >
           PKR {(amount || 0).toLocaleString()}
         </span>
       ),
@@ -384,21 +490,43 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
     {
       title: "Payment Amount",
       key: "payment_amount",
-      render: (record: Invoice) => (
-        <InputNumber
-          style={{ width: "100%" }}
-          placeholder="0"
-          min={0}
-          max={record.pending_amount}
-          value={selectedInvoices[record.id] || undefined}
-          onChange={(value) => handleInvoiceAmountChange(record.id, value || 0)}
-          addonBefore="PKR"
-          formatter={(value) =>
-            value ? `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : ""
-          }
-          parser={(value) => (value ? value.replace(/,/g, "") : "")}
-        />
-      ),
+      render: (record: any) => {
+        if (record.isOpeningBalance) {
+          return (
+            <InputNumber
+              style={{ width: "100%" }}
+              placeholder="0"
+              min={0}
+              max={record.pending_amount}
+              value={openingBalanceAllocation || undefined}
+              onChange={(value) => handleOpeningBalanceChange(value || 0)}
+              addonBefore="PKR"
+              formatter={(value) =>
+                value ? `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : ""
+              }
+              parser={(value) => (value ? value.replace(/,/g, "") : "")}
+            />
+          );
+        }
+
+        return (
+          <InputNumber
+            style={{ width: "100%" }}
+            placeholder="0"
+            min={0}
+            max={record.pending_amount}
+            value={selectedInvoices[record.id] || undefined}
+            onChange={(value) =>
+              handleInvoiceAmountChange(record.id, value || 0)
+            }
+            addonBefore="PKR"
+            formatter={(value) =>
+              value ? `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : ""
+            }
+            parser={(value) => (value ? value.replace(/,/g, "") : "")}
+          />
+        );
+      },
     },
   ];
 
@@ -481,12 +609,25 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
                     </div>
                     <div>
                       Total Pending:{" "}
-                      <strong>
+                      <strong
+                        style={{
+                          color: totalPendingAmount > 0 ? "#ff4d4f" : "#00b96b",
+                        }}
+                      >
                         PKR {(totalPendingAmount || 0).toLocaleString()}
                       </strong>
+                      {openingBalance.remaining > 0 && (
+                        <div style={{ fontSize: "12px", color: "#faad14" }}>
+                          (Includes remaining opening balance: PKR{" "}
+                          {openingBalance.remaining.toLocaleString()})
+                        </div>
+                      )}
                     </div>
                     <div style={{ fontSize: "12px", color: "#666" }}>
-                      {customerInvoices.length} pending invoices
+                      {customerInvoices.length} pending invoice(s)
+                      {openingBalance.remaining > 0
+                        ? " + remaining opening balance"
+                        : ""}
                     </div>
                   </div>
                   <Space>
@@ -501,7 +642,7 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
             <Form.Item label="Total Payment Amount">
               <InputNumber
                 style={{ width: "100%" }}
-                placeholder="Enter total payment amount"
+                placeholder="Enter payment amount"
                 value={totalSelectedAmount || undefined}
                 onChange={handleTotalAmountChange}
                 min={0}
@@ -512,6 +653,12 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
                 }
                 parser={(value) => (value ? value.replace(/,/g, "") : "")}
               />
+              <div style={{ fontSize: "12px", color: "#666", marginTop: 4 }}>
+                Maximum allowed: PKR {totalPendingAmount.toLocaleString()}
+                {openingBalance.remaining > 0 && (
+                  <span> (including remaining opening balance)</span>
+                )}
+              </div>
             </Form.Item>
 
             {isPartialPayment && (
@@ -577,17 +724,17 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
                       name="bank_name"
                       label="Bank Name"
                       rules={[
-                        { required: true, message: "Please enter bank name" },
+                        { required: false, message: "Please enter bank name" },
                       ]}
                     >
-                      <Input placeholder="Enter bank name" />
+                      <Input placeholder="Enter bank name (optional)" />
                     </Form.Item>
                     <Form.Item
                       name="cheque_date"
                       label="Cheque Date"
                       rules={[
                         {
-                          required: true,
+                          required: false,
                           message: "Please select cheque date",
                         },
                       ]}
@@ -595,6 +742,7 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
                       <DatePicker
                         style={{ width: "100%" }}
                         format="DD/MM/YYYY"
+                        placeholder="Select cheque date (optional)"
                       />
                     </Form.Item>
                   </>
@@ -614,10 +762,10 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
                     name="bank_name"
                     label="Bank Name"
                     rules={[
-                      { required: true, message: "Please enter bank name" },
+                      { required: false, message: "Please enter bank name" },
                     ]}
                   >
-                    <Input placeholder="Enter bank name" />
+                    <Input placeholder="Enter bank name (optional)" />
                   </Form.Item>
                 ) : null
               }
@@ -629,7 +777,7 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
           </Col>
         </Row>
 
-        {selectedCustomer && customerInvoices.length > 0 && (
+        {selectedCustomer && paymentDistributionData.length > 0 && (
           <Card
             title="Payment Distribution"
             size="small"
@@ -642,6 +790,9 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
                 </strong>
                 <div style={{ fontSize: "12px", color: "#666" }}>
                   of PKR {(totalPendingAmount || 0).toLocaleString()} pending
+                  {openingBalance.remaining > 0 && (
+                    <span> (including remaining opening balance)</span>
+                  )}
                 </div>
               </div>
             }
@@ -656,7 +807,7 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
             </div>
             <Table
               columns={invoiceColumns}
-              dataSource={customerInvoices}
+              dataSource={paymentDistributionData}
               rowKey="id"
               pagination={false}
               size="small"
@@ -668,9 +819,12 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
 
         {selectedCustomer &&
           customerInvoices.length === 0 &&
+          openingBalance.remaining === 0 &&
           !loadingInvoices && (
             <Card style={{ marginTop: 16, textAlign: "center" }}>
-              <p>No pending invoices found for this customer.</p>
+              <p>
+                No pending invoices or opening balance found for this customer.
+              </p>
             </Card>
           )}
 

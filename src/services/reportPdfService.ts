@@ -17,68 +17,45 @@ export const reportPdfService = {
     const pageHeight = doc.internal.pageSize.height;
     const margin = 15;
 
-    // Title
-    doc.setFontSize(18);
+    // Title - Increased font size
+    doc.setFontSize(20);
     doc.setFont("helvetica", "bold");
     doc.text("PARTIES BALANCES REPORT", pageWidth / 2, 20, { align: "center" });
 
-    // City Status
-    doc.setFontSize(12);
+    // As on Date - Center aligned with increased font
+    doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
 
-    let cityStatusText = "";
-    if (cityFilter === "all") {
-      cityStatusText = "ALL CITIES";
-    } else if (cityFilter === "") {
-      cityStatusText = "UNSPECIFIED CITIES";
-    } else {
-      cityStatusText = `${cityFilter.toUpperCase()} CITY`;
-    }
-
-    const cityStatusWidth = doc.getTextWidth(cityStatusText);
-    const cityStatusX = (pageWidth - cityStatusWidth) / 2;
-
-    // City status background
-    doc.setFillColor(41, 128, 185);
-    doc.roundedRect(cityStatusX - 8, 28, cityStatusWidth + 16, 10, 3, 3, "F");
-
-    // City status text
-    doc.setTextColor(255, 255, 255);
-    doc.text(cityStatusText, pageWidth / 2, 34, { align: "center" });
-
-    // Reset text color
-    doc.setTextColor(0, 0, 0);
-
-    // Date and Info
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
     const reportDate = asOfDate
       ? dayjs(asOfDate).format("DD/MM/YYYY")
       : dayjs().format("DD/MM/YYYY");
 
-    // Left: As on date
-    doc.text(`As on: ${reportDate}`, margin, 45);
+    doc.text(`As on: ${reportDate}`, pageWidth / 2, 30, { align: "center" });
 
-    // Right: Generated timestamp
+    // Generated timestamp - Moved below "As on"
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
     doc.text(
       `Generated: ${dayjs().format("DD/MM/YYYY HH:mm")}`,
-      pageWidth - margin,
-      45,
-      { align: "right" }
+      pageWidth / 2,
+      37,
+      { align: "center" }
     );
 
     // Quick summary line above table
-    const summaryY = 52;
-    doc.setFontSize(11);
+    const summaryY = 44;
+    doc.setFontSize(12); // Increased font size
     doc.setFont("helvetica", "bold");
 
     const summaryText = `Showing ${
       data.length
     } parties | Debit: ${this.formatCurrency(
-      totals.totalDebit
+      totals.totalDebit,
+      false
     )} | Credit: ${this.formatCurrency(
-      totals.totalCredit
-    )} | Balance: ${this.formatCurrency(totals.currentBalance)}`;
+      totals.totalCredit,
+      false
+    )} | Balance: ${this.formatCurrency(totals.currentBalance, true)}`;
     doc.text(summaryText, pageWidth / 2, summaryY, { align: "center" });
 
     // Prepare table data
@@ -87,17 +64,17 @@ export const reportPdfService = {
       item.customer?.company_name?.substring(0, 25) || "-",
       // Current Balance
       item.currentBalance < 0
-        ? `PKR ${Math.abs(item.currentBalance).toLocaleString()} CR`
-        : this.formatCurrency(item.currentBalance || 0),
-      this.formatCurrency(item.totalDebit || 0),
-      this.formatCurrency(item.totalCredit || 0),
+        ? `${Math.abs(item.currentBalance).toLocaleString()} CR`
+        : this.formatCurrency(item.currentBalance || 0, false),
+      this.formatCurrency(item.totalDebit || 0, false),
+      this.formatCurrency(item.totalCredit || 0, false),
       // Last Payment Date
       item.lastPayment?.date
         ? dayjs(item.lastPayment.date).format("DD/MM/YY")
         : "-",
       // Last Payment Amount
       item.lastPayment?.amount
-        ? this.formatCurrency(item.lastPayment.amount)
+        ? this.formatCurrency(item.lastPayment.amount, false)
         : "-",
       // Last Invoice Date
       item.lastInvoice?.date
@@ -105,7 +82,7 @@ export const reportPdfService = {
         : "-",
       // Last Invoice Amount
       item.lastInvoice?.amount
-        ? this.formatCurrency(item.lastInvoice.amount)
+        ? this.formatCurrency(item.lastInvoice.amount, false)
         : "-",
     ]);
 
@@ -118,6 +95,7 @@ export const reportPdfService = {
           styles: {
             halign: "center",
             valign: "middle",
+            fontStyle: "bold",
           },
         },
         {
@@ -126,6 +104,7 @@ export const reportPdfService = {
           styles: {
             halign: "center",
             valign: "middle",
+            fontStyle: "bold",
           },
         },
         {
@@ -134,6 +113,7 @@ export const reportPdfService = {
           styles: {
             halign: "center",
             valign: "middle",
+            fontStyle: "bold",
           },
         },
         {
@@ -142,6 +122,7 @@ export const reportPdfService = {
           styles: {
             halign: "center",
             valign: "middle",
+            fontStyle: "bold",
           },
         },
         {
@@ -150,6 +131,7 @@ export const reportPdfService = {
           styles: {
             halign: "center",
             valign: "middle",
+            fontStyle: "bold",
           },
         },
         {
@@ -158,6 +140,7 @@ export const reportPdfService = {
           styles: {
             halign: "center",
             valign: "middle",
+            fontStyle: "bold",
           },
         },
         {
@@ -166,6 +149,7 @@ export const reportPdfService = {
           styles: {
             halign: "center",
             valign: "middle",
+            fontStyle: "bold",
           },
         },
       ],
@@ -176,22 +160,23 @@ export const reportPdfService = {
     autoTable(doc, {
       head: headers,
       body: tableData,
-      startY: summaryY + 8,
+      startY: summaryY + 12,
       margin: { left: margin, right: margin },
       theme: "grid",
       styles: {
-        fontSize: 9,
-        cellPadding: 3,
+        fontSize: 11, // Increased font size
+        cellPadding: 4,
         overflow: "linebreak",
         lineColor: [200, 200, 200],
         lineWidth: 0.2,
         valign: "middle",
+        fontStyle: "bold", // Bold all table text
       },
       headStyles: {
         fillColor: [41, 128, 185],
         textColor: 255,
         fontStyle: "bold",
-        fontSize: 10,
+        fontSize: 12, // Increased font size
         halign: "center",
         valign: "middle",
         lineColor: [41, 128, 185],
@@ -201,27 +186,28 @@ export const reportPdfService = {
         fillColor: [248, 248, 248],
       },
       bodyStyles: {
-        fontSize: 9,
+        fontSize: 11, // Increased font size
         valign: "middle",
         lineColor: [200, 200, 200],
         lineWidth: 0.2,
+        fontStyle: "bold", // Bold body text
       },
-      // Column widths
+      // Column widths - adjusted for better spacing
       columnStyles: {
-        0: { cellWidth: 15, halign: "center" }, // #
-        1: { cellWidth: 50, halign: "left" }, // Party Name
-        2: { cellWidth: 35, halign: "right" }, // Current Balance
-        3: { cellWidth: 30, halign: "right" }, // Total Debit
-        4: { cellWidth: 30, halign: "right" }, // Total Credit
-        5: { cellWidth: 25, halign: "center" }, // Last Payment Date
-        6: { cellWidth: 30, halign: "right" }, // Last Payment Amount
-        7: { cellWidth: 25, halign: "center" }, // Last Invoice Date
-        8: { cellWidth: 30, halign: "right" }, // Last Invoice Amount
+        0: { cellWidth: 15, halign: "center", fontStyle: "bold", fontSize: 11 },
+        1: { cellWidth: 50, halign: "left", fontStyle: "bold", fontSize: 11 },
+        2: { cellWidth: 35, halign: "right", fontStyle: "bold", fontSize: 11 },
+        3: { cellWidth: 30, halign: "right", fontStyle: "bold", fontSize: 11 },
+        4: { cellWidth: 30, halign: "right", fontStyle: "bold", fontSize: 11 },
+        5: { cellWidth: 22, halign: "center", fontStyle: "bold", fontSize: 9 }, // Reduced font size for dates
+        6: { cellWidth: 30, halign: "right", fontStyle: "bold", fontSize: 11 },
+        7: { cellWidth: 22, halign: "center", fontStyle: "bold", fontSize: 9 }, // Reduced font size for dates
+        8: { cellWidth: 30, halign: "right", fontStyle: "bold", fontSize: 11 },
       },
       tableWidth: "auto",
       didDrawPage: (data) => {
         // Footer with page number
-        doc.setFontSize(8);
+        doc.setFontSize(9); // Increased font size
         doc.setTextColor(100, 100, 100);
         doc.text(
           `Page ${data.pageNumber}`,
@@ -234,16 +220,26 @@ export const reportPdfService = {
         // Color coding for Current Balance
         if (data.section === "body" && data.column.index === 2) {
           const cellValue = data.cell.raw;
-          const match = cellValue.match(/PKR\s([\d,]+)/);
+          const match = cellValue.match(/([\d,]+)/);
           if (match) {
             const amount = parseFloat(match[1].replace(/,/g, ""));
             const isCR = cellValue.includes("CR");
             if (isCR) {
-              data.cell.styles.textColor = [56, 158, 13]; // Green for negative
+              data.cell.styles.textColor = [56, 158, 13]; // Green for negative (credit)
+              data.cell.styles.fontStyle = "bold";
             } else if (amount > 0) {
-              data.cell.styles.textColor = [207, 19, 34]; // Red for positive
+              data.cell.styles.textColor = [207, 19, 34]; // Red for positive (debit)
+              data.cell.styles.fontStyle = "bold";
             }
           }
+        }
+
+        // Make all numeric columns bold
+        if (
+          data.section === "body" &&
+          [2, 3, 4, 6, 8].includes(data.column.index)
+        ) {
+          data.cell.styles.fontStyle = "bold";
         }
       },
     });
@@ -320,9 +316,9 @@ export const reportPdfService = {
         dayjs(payment.payment_date).format("DD/MM/YY"),
         payment.customer?.company_name?.substring(0, 25) || "-",
         payment.reference_number?.substring(0, 15) || "-",
-        this.formatCurrency(payment.total_received || 0),
-        this.formatCurrency(item.totalAllocated || 0),
-        this.formatCurrency(item.remainingAmount || 0),
+        this.formatCurrency(payment.total_received || 0, false),
+        this.formatCurrency(item.totalAllocated || 0, false),
+        this.formatCurrency(item.remainingAmount || 0, false),
         item.allocationCount?.toString() || "0",
         payment.payment_method?.toUpperCase() || "-",
         payment.status?.toUpperCase() || "-",
@@ -346,18 +342,20 @@ export const reportPdfService = {
 
     // Generate table WITHOUT summary row
     autoTable(doc, {
-      head: [headers],
+      head: headers,
       body: tableData,
-      startY: 55, // Increased startY
+      startY: summaryY + 8,
       margin: { left: margin, right: margin },
       theme: "grid",
+      tableWidth: "wrap", // Add this line to wrap table width
       styles: {
-        fontSize: 9,
-        cellPadding: 3,
+        fontSize: 10, // Increased font size
+        cellPadding: 4,
         overflow: "linebreak",
         lineColor: [200, 200, 200],
         lineWidth: 0.2,
         valign: "middle",
+        fontStyle: "bold", // Bold all table text
       },
       headStyles: {
         fillColor: [52, 152, 219], // Different blue for variety
@@ -428,17 +426,17 @@ export const reportPdfService = {
     // First row
     doc.text(`Total Payments: ${data.length}`, margin, detailsY);
     doc.text(
-      `Total Received: ${this.formatCurrency(totals.totalReceived)}`,
+      `Total Received: ${this.formatCurrency(totals.totalReceived, true)}`,
       margin + 80,
       detailsY
     );
     doc.text(
-      `Total Allocated: ${this.formatCurrency(totals.totalAllocated)}`,
+      `Total Allocated: ${this.formatCurrency(totals.totalAllocated, true)}`,
       margin + 160,
       detailsY
     );
     doc.text(
-      `Total Remaining: ${this.formatCurrency(totals.remainingAmount)}`,
+      `Total Remaining: ${this.formatCurrency(totals.remainingAmount, true)}`,
       margin + 240,
       detailsY
     );
@@ -1196,9 +1194,9 @@ export const reportPdfService = {
     return colors[status] || [150, 150, 150]; // Gray default
   },
 
-  // Helper to format currency
-  formatCurrency(amount: number): string {
-    if (amount === 0) return "PKR 0";
+  // Helper to format currency with option to include PKR
+  formatCurrency(amount: number, includePKR: boolean = true): string {
+    if (amount === 0) return includePKR ? "PKR 0" : "0";
 
     const isNegative = amount < 0;
     const absAmount = Math.abs(amount);
@@ -1209,6 +1207,6 @@ export const reportPdfService = {
       maximumFractionDigits: 2,
     });
 
-    return `PKR ${formatted}${isNegative ? " DR" : ""}`;
+    return `${includePKR ? "PKR " : ""}${formatted}${isNegative ? " DR" : ""}`;
   },
 };

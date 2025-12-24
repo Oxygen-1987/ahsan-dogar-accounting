@@ -62,6 +62,14 @@ export interface InvoiceItem {
   total: number;
 }
 
+// Add Product type
+export interface Product extends BaseEntity {
+  name: string;
+  description?: string;
+  default_rate?: number;
+  status: "active" | "inactive";
+}
+
 // Invoice Term types
 export type InvoiceTerm = "due_on_receipt" | "net_15" | "net_30" | "net_60";
 
@@ -182,13 +190,14 @@ export interface LedgerEntry extends BaseEntity {
   customer_id: string;
   customer?: Customer;
   date: string;
-  type: "invoice" | "payment" | "adjustment";
+  type: "invoice" | "payment" | "adjustment" | "opening_balance_payment";
   reference_id: string;
   reference_number: string;
   debit: number;
   credit: number;
   balance: number;
   description: string;
+  is_hidden?: boolean; // Add this
 }
 
 // Expense types

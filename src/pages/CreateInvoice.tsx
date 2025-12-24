@@ -1,4 +1,3 @@
-// src/pages/CreateInvoice.tsx - UPDATED WITH PROFESSIONAL PRINT OPTIONS
 import React, { useState, useEffect } from "react";
 import {
   Card,
@@ -19,6 +18,8 @@ import {
   Dropdown,
   Modal,
   type MenuProps,
+  Tag,
+  Popconfirm,
 } from "antd";
 import {
   CloseOutlined,
@@ -30,19 +31,20 @@ import {
   DownOutlined,
   EyeOutlined,
   FilePdfOutlined,
-  FileImageOutlined,
+  EditOutlined,
+  InfoCircleOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import type { ColumnsType } from "antd/es/table";
 import type {
   Customer,
   InvoiceLineItem,
-  InvoiceTerm,
   Invoice,
   InvoiceFormData,
 } from "../types";
 import { customerService } from "../services/customerService";
 import { invoiceService } from "../services/invoiceService";
+import { productService } from "../services/productService";
 import { professionalInvoiceService } from "../services/professionalInvoiceService";
 import { supabase } from "../services/supabaseClient";
 import dayjs from "dayjs";
@@ -52,12 +54,23 @@ const { Title, Text } = Typography;
 const { TextArea } = Input;
 const { Option } = Select;
 
+interface Product {
+  id: string;
+  name: string;
+  description?: string;
+  default_rate?: number;
+  is_predefined?: boolean;
+  is_editable?: boolean;
+  status: "active" | "inactive";
+}
+
 const CreateInvoice: React.FC = () => {
   const { message: messageApi, modal } = App.useApp();
   const navigate = useNavigate();
-  const { id } = useParams(); // Get invoice ID from URL for edit mode
+  const { id } = useParams();
   const [form] = Form.useForm();
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(
@@ -76,20 +89,40 @@ const CreateInvoice: React.FC = () => {
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [isEditMode, setIsEditMode] = useState(false);
   const [currentInvoice, setCurrentInvoice] = useState<Invoice | null>(null);
+  const [showProductManagementModal, setShowProductManagementModal] =
+    useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [productForm] = Form.useForm();
+  const [productManagementModal, setProductManagementModal] =
+    useState<ReturnType<typeof modal.confirm> | null>(null);
 
-  // Load customers
+  // Load customers and products
   useEffect(() => {
-    const loadCustomers = async () => {
+    const loadData = async () => {
       try {
+        // Load customers
         const { customers: customersData } =
           await customerService.getAllCustomers();
         setCustomers(customersData);
+
+        // Load products
+        await loadProducts();
       } catch (error) {
-        console.error("Error loading customers:", error);
+        console.error("Error loading data:", error);
       }
     };
-    loadCustomers();
+    loadData();
   }, []);
+
+  // Load products
+  const loadProducts = async () => {
+    try {
+      const productsData = await productService.getActiveProducts();
+      setProducts(productsData as Product[]);
+    } catch (error) {
+      console.error("Error loading products:", error);
+    }
+  };
 
   // Load invoice data if in edit mode
   useEffect(() => {
@@ -114,10 +147,7 @@ const CreateInvoice: React.FC = () => {
           invoice_number: invoice.invoice_number,
           customer_id: invoice.customer_id,
           issue_date: dayjs(invoice.issue_date),
-          due_date: dayjs(invoice.due_date),
-          term: "net_15",
           notes: invoice.notes,
-          payment_terms: invoice.payment_terms,
         });
 
         // Set line items
@@ -138,8 +168,6 @@ const CreateInvoice: React.FC = () => {
         if (invoice.customer) {
           setSelectedCustomer(invoice.customer);
         }
-
-        console.log("Loaded invoice data:", invoice);
       } else {
         messageApi.error("Invoice not found");
         navigate("/invoices");
@@ -155,29 +183,17 @@ const CreateInvoice: React.FC = () => {
   // Predict next invoice number
   const predictNextInvoiceNumber = async (): Promise<string> => {
     try {
-      console.log("Predicting next invoice number...");
       const currentYear = new Date().getFullYear();
-
-      // Get invoices directly from Supabase
-      const { data: invoices, error } = await supabase
+      const { data: invoices } = await supabase
         .from("invoices")
         .select("invoice_number")
         .ilike("invoice_number", `INV-${currentYear}-%`)
         .order("invoice_number", { ascending: false });
 
-      if (error) {
-        console.error("Error fetching invoices:", error);
-        return `INV-${currentYear}-001`;
-      }
-
-      console.log(`Found ${invoices?.length || 0} invoices for ${currentYear}`);
-
       if (!invoices || invoices.length === 0) {
-        console.log("No invoices found, starting from 001");
         return `INV-${currentYear}-001`;
       }
 
-      // Extract and find max sequence number
       let maxSequence = 0;
       invoices.forEach((inv) => {
         const match = inv.invoice_number.match(/INV-\d+-(\d+)/);
@@ -190,17 +206,7 @@ const CreateInvoice: React.FC = () => {
       });
 
       const nextSequence = maxSequence + 1;
-      const nextNumber = `INV-${currentYear}-${nextSequence
-        .toString()
-        .padStart(3, "0")}`;
-
-      console.log("Predicted next number:", {
-        maxSequence,
-        nextSequence,
-        nextNumber,
-      });
-
-      return nextNumber;
+      return `INV-${currentYear}-${nextSequence.toString().padStart(3, "0")}`;
     } catch (error) {
       console.error("Error predicting next invoice number:", error);
       return `INV-${new Date().getFullYear()}-001`;
@@ -210,50 +216,12 @@ const CreateInvoice: React.FC = () => {
   // Set predicted invoice number for new invoices
   useEffect(() => {
     if (!id && !isEditMode) {
-      // For new invoices, predict the next number
-      console.log("Loading new invoice form, predicting next number...");
       predictNextInvoiceNumber().then((predictedNumber) => {
-        console.log("Setting predicted invoice number:", predictedNumber);
         setInvoiceNumber(predictedNumber);
         form.setFieldValue("invoice_number", predictedNumber);
       });
     }
   }, [id, isEditMode]);
-
-  // Calculate due date based on term
-  const calculateDueDate = (issueDate: string, term: InvoiceTerm): string => {
-    const issue = dayjs(issueDate);
-    switch (term) {
-      case "due_on_receipt":
-        return issue.format("YYYY-MM-DD");
-      case "net_15":
-        return issue.add(15, "day").format("YYYY-MM-DD");
-      case "net_30":
-        return issue.add(30, "day").format("YYYY-MM-DD");
-      case "net_60":
-        return issue.add(60, "day").format("YYYY-MM-DD");
-      default:
-        return issue.add(15, "day").format("YYYY-MM-DD");
-    }
-  };
-
-  // Handle term change
-  const handleTermChange = (term: InvoiceTerm) => {
-    const issueDate = form.getFieldValue("issue_date");
-    if (issueDate) {
-      const dueDate = calculateDueDate(issueDate.format("YYYY-MM-DD"), term);
-      form.setFieldValue("due_date", dayjs(dueDate));
-    }
-  };
-
-  // Handle issue date change
-  const handleIssueDateChange = (date: any) => {
-    const term = form.getFieldValue("term") || "net_15";
-    if (date) {
-      const dueDate = calculateDueDate(date.format("YYYY-MM-DD"), term);
-      form.setFieldValue("due_date", dayjs(dueDate));
-    }
-  };
 
   // Handle customer selection
   const handleCustomerChange = (customerId: string) => {
@@ -261,7 +229,18 @@ const CreateInvoice: React.FC = () => {
     setSelectedCustomer(customer);
   };
 
-  // Line item calculations
+  // Handle product selection
+  const handleProductSelect = (productId: string, itemId: string) => {
+    const selectedProduct = products.find((p) => p.id === productId);
+    if (selectedProduct) {
+      updateLineItem(itemId, "description", selectedProduct.name);
+      if (selectedProduct.default_rate) {
+        updateLineItem(itemId, "rate", selectedProduct.default_rate);
+      }
+    }
+  };
+
+  // Update line item with auto-calculation
   const updateLineItem = (
     id: string,
     field: keyof InvoiceLineItem,
@@ -272,11 +251,20 @@ const CreateInvoice: React.FC = () => {
         if (item.id === id) {
           const updatedItem = { ...item, [field]: value };
 
-          // Auto-calculate amounts
+          // Auto-calculate based on which field changed
           if (field === "inches" || field === "rate") {
-            updatedItem.amount = updatedItem.inches * updatedItem.rate;
+            // If inches or rate changes, recalculate amount for single item
+            const singleItemAmount = updatedItem.inches * updatedItem.rate;
+            // Then multiply by quantity
+            updatedItem.amount = singleItemAmount * updatedItem.quantity;
           } else if (field === "amount" && updatedItem.inches > 0) {
-            updatedItem.rate = updatedItem.amount / updatedItem.inches;
+            // If amount changes, calculate rate per inch for single item
+            const ratePerInch = updatedItem.amount / updatedItem.inches;
+            updatedItem.rate = ratePerInch;
+          } else if (field === "quantity") {
+            // If quantity changes, recalculate total amount
+            const singleItemAmount = updatedItem.inches * updatedItem.rate;
+            updatedItem.amount = singleItemAmount * updatedItem.quantity;
           }
 
           return updatedItem;
@@ -311,7 +299,7 @@ const CreateInvoice: React.FC = () => {
   // Calculate totals
   const calculateTotals = () => {
     const subtotal = lineItems.reduce((sum, item) => sum + item.amount, 0);
-    const total = subtotal; // You can add tax here if needed
+    const total = subtotal;
     return { subtotal, total };
   };
 
@@ -325,23 +313,29 @@ const CreateInvoice: React.FC = () => {
       setLoading(true);
       const values = await form.validateFields();
 
-      console.log("Form values:", values);
+      // Validate line items
+      const hasEmptyDescriptions = lineItems.some(
+        (item) => !item.description.trim()
+      );
+      if (hasEmptyDescriptions) {
+        throw new Error("Please fill all product descriptions");
+      }
 
       // Prepare invoice data
       const invoiceData: InvoiceFormData = {
         customer_id: values.customer_id,
         issue_date: values.issue_date.format("YYYY-MM-DD"),
-        due_date: values.due_date.format("YYYY-MM-DD"),
-        term: values.term,
+        due_date: values.issue_date.format("YYYY-MM-DD"), // Same as issue date
+        term: "due_on_receipt", // Default term
         line_items: lineItems,
         notes: values.notes,
-        payment_terms: values.payment_terms,
+        payment_terms: "",
       };
 
       let result: Invoice;
 
       if (isEditMode && currentInvoice) {
-        // For editing, include the invoice number
+        // For editing
         invoiceData.invoice_number = currentInvoice.invoice_number;
         result = await invoiceService.updateInvoice(
           currentInvoice.id,
@@ -349,14 +343,10 @@ const CreateInvoice: React.FC = () => {
         );
         messageApi.success("Invoice updated successfully");
       } else {
-        // For new invoices, DO NOT include invoice_number
+        // For new invoices
         result = await invoiceService.createInvoice(invoiceData);
-
-        // Update with the generated number
         setInvoiceNumber(result.invoice_number);
         setCurrentInvoice(result);
-        console.log("Generated invoice number:", result.invoice_number);
-
         messageApi.success(
           `Invoice ${result.invoice_number} created successfully`
         );
@@ -384,14 +374,7 @@ const CreateInvoice: React.FC = () => {
         form.setFieldsValue({
           invoice_number: nextNumber,
           issue_date: dayjs(),
-          term: "net_15",
-          due_date: dayjs().add(15, "day"),
         });
-
-        console.log(
-          "Reset form for new invoice, next predicted number:",
-          nextNumber
-        );
       } else if (action === "save_and_close") {
         navigate("/invoices");
       }
@@ -419,13 +402,11 @@ const CreateInvoice: React.FC = () => {
 
     try {
       setExporting(true);
-
       await professionalInvoiceService.downloadInvoice(
         currentInvoice,
         format,
         includeLetterhead
       );
-
       messageApi.success(
         `${format.toUpperCase()} downloaded ${
           includeLetterhead ? "with letterhead" : "without letterhead"
@@ -500,59 +481,6 @@ const CreateInvoice: React.FC = () => {
                 </div>
               </div>
             </Button>
-
-            <Button
-              block
-              size="large"
-              icon={<FileImageOutlined />}
-              onClick={async () => {
-                modalInstance.destroy();
-                await handleExportInvoice("jpg", true);
-              }}
-              style={{ textAlign: "left", height: "48px" }}
-            >
-              <div
-                style={{ display: "flex", alignItems: "center", gap: "8px" }}
-              >
-                <FileImageOutlined />
-                <div>
-                  <div style={{ fontWeight: "bold" }}>JPG Image</div>
-                  <div style={{ fontSize: "12px", color: "#666" }}>
-                    High-quality image format
-                  </div>
-                </div>
-              </div>
-            </Button>
-
-            <Button
-              block
-              size="large"
-              icon={<EyeOutlined />}
-              onClick={async () => {
-                modalInstance.destroy();
-                try {
-                  await professionalInvoiceService.previewProfessionalInvoice(
-                    currentInvoice,
-                    true
-                  );
-                } catch (error) {
-                  messageApi.error("Failed to preview invoice");
-                }
-              }}
-              style={{ textAlign: "left", height: "48px" }}
-            >
-              <div
-                style={{ display: "flex", alignItems: "center", gap: "8px" }}
-              >
-                <EyeOutlined />
-                <div>
-                  <div style={{ fontWeight: "bold" }}>Preview in Browser</div>
-                  <div style={{ fontSize: "12px", color: "#666" }}>
-                    Open invoice in new window
-                  </div>
-                </div>
-              </div>
-            </Button>
           </Space>
         </div>
       ),
@@ -562,6 +490,211 @@ const CreateInvoice: React.FC = () => {
       width: 450,
     });
   };
+
+  // Handle product form submission
+  const handleProductFormSubmit = async (values: any) => {
+    try {
+      setLoading(true);
+
+      if (editingProduct) {
+        // Don't allow editing predefined product type
+        const updates = { ...values };
+        if (editingProduct.is_predefined) {
+          delete updates.is_predefined; // Don't change predefined status
+        }
+
+        await productService.updateProduct(editingProduct.id, updates);
+        messageApi.success("Product updated successfully");
+      } else {
+        await productService.createProduct({
+          ...values,
+          is_predefined: false, // New products are always custom
+        });
+        messageApi.success("Product added successfully");
+      }
+
+      // Refresh products
+      await loadProducts();
+
+      // Close modal
+      setShowProductManagementModal(false);
+      setEditingProduct(null);
+      productForm.resetFields();
+    } catch (error: any) {
+      console.error("Error saving product:", error);
+      messageApi.error(`Failed to save product: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Show product management modal
+  const showProductManagement = () => {
+    const modalInstance = modal.confirm({
+      title: "Manage Products",
+      width: 800,
+      content: (
+        <div style={{ maxHeight: 400, overflowY: "auto" }}>
+          <Table
+            dataSource={products}
+            rowKey="id"
+            pagination={false}
+            size="small"
+            columns={[
+              {
+                title: "Product Name",
+                dataIndex: "name",
+                key: "name",
+                width: 200,
+              },
+              {
+                title: "Description",
+                dataIndex: "description",
+                key: "description",
+                width: 200,
+                ellipsis: true,
+              },
+              {
+                title: "Rate (PKR/inch)",
+                dataIndex: "default_rate",
+                key: "default_rate",
+                width: 120,
+                render: (rate) =>
+                  rate
+                    ? rate.toLocaleString("en-PK", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })
+                    : "0.00",
+              },
+              {
+                title: "Type",
+                key: "type",
+                width: 120,
+                render: (_, product) =>
+                  product.is_predefined ? (
+                    <Tag color="orange">Predefined</Tag>
+                  ) : (
+                    <Tag color="green">Custom</Tag>
+                  ),
+              },
+              {
+                title: "Status",
+                dataIndex: "status",
+                key: "status",
+                width: 100,
+                render: (status) => (
+                  <Tag color={status === "active" ? "success" : "error"}>
+                    {status}
+                  </Tag>
+                ),
+              },
+              {
+                title: "Actions",
+                key: "actions",
+                width: 120,
+                render: (_, product) => (
+                  <Space>
+                    <Button
+                      type="text"
+                      icon={<EditOutlined />}
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Close the management modal first
+                        modalInstance.destroy();
+                        setProductManagementModal(null);
+
+                        // Then open edit modal
+                        setTimeout(() => {
+                          setEditingProduct(product);
+                          productForm.setFieldsValue({
+                            name: product.name,
+                            default_rate: product.default_rate || 0,
+                            description: product.description || "",
+                            is_predefined: product.is_predefined || false,
+                          });
+                          setShowProductManagementModal(true);
+                        }, 100);
+                      }}
+                    />
+                    {!product.is_predefined && (
+                      <Popconfirm
+                        title="Delete this product?"
+                        description="This will permanently delete the product."
+                        onConfirm={async () => {
+                          try {
+                            await productService.deleteProduct(product.id);
+                            messageApi.success("Product deleted permanently");
+                            await loadProducts();
+                          } catch (error: any) {
+                            messageApi.error(
+                              `Failed to delete product: ${error.message}`
+                            );
+                          }
+                        }}
+                        okText="Yes"
+                        cancelText="No"
+                        okButtonProps={{ danger: true }}
+                      >
+                        <Button
+                          type="text"
+                          danger
+                          icon={<DeleteOutlined />}
+                          size="small"
+                        />
+                      </Popconfirm>
+                    )}
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        </div>
+      ),
+      okButtonProps: { style: { display: "none" } },
+      cancelText: "Close",
+      centered: true,
+      onCancel: () => {
+        setProductManagementModal(null);
+      },
+    });
+
+    setProductManagementModal(modalInstance);
+  };
+
+  // Render product dropdown with custom render
+  const renderProductDropdown = (
+    menu: React.ReactElement,
+    record: InvoiceLineItem
+  ) => (
+    <>
+      {menu}
+      <Divider style={{ margin: "4px 0" }} />
+      <div style={{ padding: "4px 8px" }}>
+        <Button
+          type="text"
+          icon={<PlusOutlined />}
+          size="small"
+          block
+          onClick={() => {
+            // Close dropdown first
+            const dropdown = document.querySelector(".ant-select-dropdown");
+            if (dropdown) {
+              (dropdown as HTMLElement).style.display = "none";
+            }
+
+            // Open product management modal
+            setEditingProduct(null);
+            productForm.resetFields();
+            setShowProductManagementModal(true);
+          }}
+        >
+          Add New Product
+        </Button>
+      </div>
+    </>
+  );
 
   // Save dropdown menu
   const saveMenu: MenuProps = {
@@ -602,48 +735,103 @@ const CreateInvoice: React.FC = () => {
         icon: <FilePdfOutlined />,
         onClick: () => handleExportInvoice("pdf", false),
       },
-      {
-        key: "export_jpg",
-        label: "JPG Image",
-        icon: <FileImageOutlined />,
-        onClick: () => handleExportInvoice("jpg", true),
-      },
-      {
-        key: "preview",
-        label: "Preview in Browser",
-        icon: <EyeOutlined />,
-        onClick: async () => {
-          if (currentInvoice) {
-            try {
-              await professionalInvoiceService.previewProfessionalInvoice(
-                currentInvoice,
-                true
-              );
-            } catch (error) {
-              messageApi.error("Failed to preview invoice");
-            }
-          } else {
-            messageApi.warning("Please save the invoice first");
-          }
-        },
-      },
     ],
   };
 
-  // Line items table columns
+  // Line items table columns with product dropdown
   const lineItemsColumns: ColumnsType<InvoiceLineItem> = [
     {
       title: "Product Description",
       dataIndex: "description",
       key: "description",
+      width: 300,
       render: (_, record) => (
-        <Input
-          placeholder="Enter product description"
-          value={record.description}
-          onChange={(e) =>
-            updateLineItem(record.id, "description", e.target.value)
-          }
-        />
+        <div style={{ display: "flex", gap: 8 }}>
+          <Select
+            placeholder="Select or search product"
+            style={{ flex: 1 }}
+            value={record.description || undefined}
+            onChange={(value) => handleProductSelect(value, record.id)}
+            showSearch
+            optionFilterProp="children"
+            filterOption={(input, option) =>
+              (option?.children as string)
+                ?.toLowerCase()
+                .includes(input.toLowerCase()) ||
+              (option?.value as string)
+                ?.toLowerCase()
+                .includes(input.toLowerCase())
+            }
+            dropdownRender={(menu) => renderProductDropdown(menu, record)}
+          >
+            <Select.OptGroup label="Custom Products">
+              {products
+                .filter(
+                  (product) =>
+                    !product.is_predefined && product.status === "active"
+                )
+                .map((product) => (
+                  <Option key={product.id} value={product.id}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <span>{product.name}</span>
+                      {product.default_rate && product.default_rate > 0 && (
+                        <Tag
+                          color="blue"
+                          style={{ marginLeft: 8, fontSize: 11 }}
+                        >
+                          {product.default_rate.toLocaleString("en-PK", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                          /inch
+                        </Tag>
+                      )}
+                    </div>
+                  </Option>
+                ))}
+            </Select.OptGroup>
+
+            <Select.OptGroup label="Predefined Products">
+              {products
+                .filter(
+                  (product) =>
+                    product.is_predefined && product.status === "active"
+                )
+                .map((product) => (
+                  <Option key={product.id} value={product.id}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <span>{product.name}</span>
+                      <Tag
+                        color="orange"
+                        style={{ marginLeft: 8, fontSize: 11 }}
+                      >
+                        Predefined
+                      </Tag>
+                    </div>
+                  </Option>
+                ))}
+            </Select.OptGroup>
+          </Select>
+
+          <Input
+            placeholder="Or enter custom description"
+            value={record.description}
+            onChange={(e) =>
+              updateLineItem(record.id, "description", e.target.value)
+            }
+            style={{ flex: 1 }}
+          />
+        </div>
       ),
     },
     {
@@ -666,7 +854,7 @@ const CreateInvoice: React.FC = () => {
       title: "Length (Inches)",
       dataIndex: "inches",
       key: "inches",
-      width: 120,
+      width: 140,
       render: (_, record) => (
         <InputNumber
           min={0}
@@ -681,7 +869,7 @@ const CreateInvoice: React.FC = () => {
       title: "Rate (PKR/inch)",
       dataIndex: "rate",
       key: "rate",
-      width: 120,
+      width: 140,
       render: (_, record) => (
         <InputNumber
           min={0}
@@ -689,10 +877,18 @@ const CreateInvoice: React.FC = () => {
           value={record.rate}
           onChange={(value) => updateLineItem(record.id, "rate", value || 0)}
           style={{ width: "100%" }}
-          formatter={(value) =>
-            `PKR ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-          }
-          parser={(value) => value?.replace(/PKR\s?|(,*)/g, "") as any}
+          formatter={(value) => {
+            if (!value) return "0";
+            const num = parseFloat(value.toString());
+            if (isNaN(num)) return "0";
+            return num.toLocaleString("en-PK", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            });
+          }}
+          parser={(value) => {
+            return value ? parseFloat(value.replace(/,/g, "")) : 0;
+          }}
         />
       ),
     },
@@ -700,8 +896,28 @@ const CreateInvoice: React.FC = () => {
       title: "Amount",
       dataIndex: "amount",
       key: "amount",
-      width: 120,
-      render: (amount) => `PKR ${amount.toLocaleString()}`,
+      width: 140,
+      render: (_, record) => (
+        <InputNumber
+          min={0}
+          step={0.01}
+          value={record.amount}
+          onChange={(value) => updateLineItem(record.id, "amount", value || 0)}
+          style={{ width: "100%" }}
+          formatter={(value) => {
+            if (!value) return "0";
+            const num = parseFloat(value.toString());
+            if (isNaN(num)) return "0";
+            return num.toLocaleString("en-PK", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            });
+          }}
+          parser={(value) => {
+            return value ? parseFloat(value.replace(/,/g, "")) : 0;
+          }}
+        />
+      ),
     },
     {
       title: "",
@@ -721,12 +937,113 @@ const CreateInvoice: React.FC = () => {
 
   return (
     <div className="create-invoice-page">
-      {/* Header */}
-      <Card
-        styles={{
-          body: { padding: "16px 24px" },
+      {/* Product Management Modal */}
+      <Modal
+        title={editingProduct ? "Edit Product" : "Add New Product"}
+        open={showProductManagementModal}
+        onCancel={() => {
+          setShowProductManagementModal(false);
+          setEditingProduct(null);
+          productForm.resetFields();
         }}
+        footer={[
+          <Button
+            key="cancel"
+            onClick={() => {
+              setShowProductManagementModal(false);
+              setEditingProduct(null);
+              productForm.resetFields();
+            }}
+          >
+            Cancel
+          </Button>,
+          <Button
+            key="submit"
+            type="primary"
+            onClick={() => {
+              productForm.submit();
+            }}
+            loading={loading}
+          >
+            {editingProduct ? "Update Product" : "Add Product"}
+          </Button>,
+        ]}
+        destroyOnClose
+        zIndex={1001}
       >
+        <div style={{ padding: "16px 0" }}>
+          <Form
+            form={productForm}
+            layout="vertical"
+            initialValues={
+              editingProduct || { default_rate: 0, is_predefined: false }
+            }
+            onFinish={handleProductFormSubmit}
+          >
+            <Form.Item
+              label="Product Name"
+              name="name"
+              rules={[{ required: true, message: "Please enter product name" }]}
+            >
+              <Input placeholder="e.g., Conveyor Belt" />
+            </Form.Item>
+
+            <Form.Item
+              label="Default Rate (PKR/inch)"
+              name="default_rate"
+              rules={[{ required: false }]}
+            >
+              <InputNumber
+                placeholder="0.00"
+                min={0}
+                step={0.01}
+                style={{ width: "100%" }}
+                formatter={(value) => {
+                  if (!value) return "0";
+                  const num = parseFloat(value.toString());
+                  if (isNaN(num)) return "0";
+                  return num.toLocaleString("en-PK", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  });
+                }}
+                parser={(value) => {
+                  return value ? parseFloat(value.replace(/,/g, "")) : 0;
+                }}
+              />
+            </Form.Item>
+
+            <Form.Item label="Description" name="description">
+              <TextArea placeholder="Product description (optional)" rows={2} />
+            </Form.Item>
+
+            {!editingProduct && (
+              <Form.Item name="is_predefined" hidden>
+                <Input type="hidden" value={false} />
+              </Form.Item>
+            )}
+
+            {editingProduct?.is_predefined && (
+              <div
+                style={{
+                  padding: "8px",
+                  backgroundColor: "#fffbe6",
+                  borderRadius: 4,
+                  marginTop: 8,
+                }}
+              >
+                <Text type="warning">
+                  <InfoCircleOutlined /> This is a predefined product. Some
+                  fields may be restricted.
+                </Text>
+              </div>
+            )}
+          </Form>
+        </div>
+      </Modal>
+
+      {/* Header */}
+      <Card styles={{ body: { padding: "16px 24px" } }}>
         <div
           style={{
             display: "flex",
@@ -774,9 +1091,6 @@ const CreateInvoice: React.FC = () => {
                 <Text type="secondary" style={{ display: "block" }}>
                   Phone: +92421234567
                 </Text>
-                <Text type="secondary" style={{ display: "block" }}>
-                  Email: info@dogarrubber.com
-                </Text>
               </div>
             </div>
           </Col>
@@ -796,14 +1110,7 @@ const CreateInvoice: React.FC = () => {
                   >
                     PKR {total.toLocaleString()}
                   </Title>
-                  <Text type="secondary">
-                    Due:{" "}
-                    {form.getFieldValue("due_date")
-                      ? dayjs(form.getFieldValue("due_date")).format(
-                          "DD/MM/YYYY"
-                        )
-                      : "N/A"}
-                  </Text>
+                  <Text type="secondary">Manual Invoice Number Entry</Text>
                 </div>
               </Card>
             </div>
@@ -815,8 +1122,6 @@ const CreateInvoice: React.FC = () => {
           layout="vertical"
           initialValues={{
             issue_date: dayjs(),
-            term: "net_15",
-            due_date: dayjs().add(15, "day"),
           }}
         >
           {/* Customer and Invoice Details Section */}
@@ -865,7 +1170,7 @@ const CreateInvoice: React.FC = () => {
               )}
             </Col>
 
-            <Col span={8}>{/* Empty column for spacing */}</Col>
+            <Col span={8}>{/* Spacing column */}</Col>
 
             <Col span={8}>
               <Row gutter={16}>
@@ -876,19 +1181,20 @@ const CreateInvoice: React.FC = () => {
                     rules={[
                       { required: true, message: "Invoice number is required" },
                       {
-                        pattern: /^INV-\d{4}-\d{3}$/,
-                        message:
-                          "Invoice number must be in format INV-YYYY-NNN (e.g., INV-2025-001)",
+                        pattern: /^INV-.+/,
+                        message: "Invoice number must start with INV-",
                       },
                     ]}
                   >
                     <Input
-                      value={invoiceNumber}
+                      prefix="INV-"
+                      placeholder="Enter number after INV-"
+                      value={invoiceNumber?.replace(/^INV-/, "")}
                       onChange={(e) => {
-                        setInvoiceNumber(e.target.value);
-                        form.setFieldValue("invoice_number", e.target.value);
+                        const newNumber = `INV-${e.target.value}`;
+                        setInvoiceNumber(newNumber);
+                        form.setFieldValue("invoice_number", newNumber);
                       }}
-                      placeholder="Enter invoice number (e.g., INV-2025-001)"
                     />
                   </Form.Item>
                 </Col>
@@ -900,32 +1206,6 @@ const CreateInvoice: React.FC = () => {
                       { required: true, message: "Please select invoice date" },
                     ]}
                   >
-                    <DatePicker
-                      format="DD/MM/YYYY"
-                      style={{ width: "100%" }}
-                      onChange={handleIssueDateChange}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item
-                    label="Term"
-                    name="term"
-                    rules={[{ required: true, message: "Please select term" }]}
-                  >
-                    <Select onChange={handleTermChange}>
-                      <Option value="due_on_receipt">Due upon receipt</Option>
-                      <Option value="net_15">Net 15</Option>
-                      <Option value="net_30">Net 30</Option>
-                      <Option value="net_60">Net 60</Option>
-                    </Select>
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item label="Due Date" name="due_date">
                     <DatePicker format="DD/MM/YYYY" style={{ width: "100%" }} />
                   </Form.Item>
                 </Col>
@@ -945,14 +1225,30 @@ const CreateInvoice: React.FC = () => {
               size="small"
               className="line-items-table"
               footer={() => (
-                <Button
-                  type="dashed"
-                  icon={<PlusOutlined />}
-                  onClick={addLineItem}
-                  block
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
                 >
-                  Add Line Item
-                </Button>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Button
+                      type="dashed"
+                      icon={<PlusOutlined />}
+                      onClick={addLineItem}
+                    >
+                      Add Line Item
+                    </Button>
+                    <Button
+                      icon={<EditOutlined />}
+                      onClick={showProductManagement}
+                    >
+                      Manage Products
+                    </Button>
+                  </div>
+                  <div>{/* Empty div for spacing */}</div>
+                </div>
               )}
             />
           </div>
@@ -963,9 +1259,6 @@ const CreateInvoice: React.FC = () => {
           <Row gutter={24}>
             <Col span={12}>
               <Space direction="vertical" style={{ width: "100%" }}>
-                <Form.Item label="Payment Terms" name="payment_terms">
-                  <TextArea placeholder="Enter payment terms" rows={3} />
-                </Form.Item>
                 <Form.Item label="Notes" name="notes">
                   <TextArea placeholder="Enter any notes" rows={3} />
                 </Form.Item>

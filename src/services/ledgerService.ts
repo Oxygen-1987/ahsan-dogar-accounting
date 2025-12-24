@@ -12,6 +12,7 @@ export const ledgerService = {
         .from("ledger_entries")
         .select("*")
         .eq("customer_id", customerId)
+        .eq("is_hidden", false) // EXCLUDE hidden entries
         .order("date", { ascending: true })
         .order("created_at", { ascending: true });
 

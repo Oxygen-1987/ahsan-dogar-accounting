@@ -175,7 +175,260 @@ export const paymentService = {
     }
   },
 
-  // Create customer payment - CORRECTED VERSION
+  // Get customer opening balance with paid amount tracking
+  async getCustomerOpeningBalance(customerId: string): Promise<{
+    amount: number;
+    date: string;
+    isPositive: boolean;
+    paidAmount: number;
+    remainingAmount: number;
+  }> {
+    try {
+      console.log("=== CORRECTED: Getting opening balance ===");
+
+      // 1. Get opening balance ledger entry
+      const { data: openingEntry, error: openingError } = await supabase
+        .from("ledger_entries")
+        .select("*")
+        .eq("customer_id", customerId)
+        .eq("type", "opening_balance")
+        .single();
+
+      if (openingError || !openingEntry) {
+        console.log("No opening balance found");
+        return {
+          amount: 0,
+          date: "",
+          isPositive: true,
+          paidAmount: 0,
+          remainingAmount: 0,
+        };
+      }
+
+      const openingAmount = openingEntry.debit || 0; // Opening balance is DEBIT
+      console.log("Opening balance (debit):", openingAmount);
+
+      // 2. Get ALL ledger entries to find payments against opening balance
+      const { data: allEntries, error: entriesError } = await supabase
+        .from("ledger_entries")
+        .select("*")
+        .eq("customer_id", customerId)
+        .order("date", { ascending: true });
+
+      let paidAmount = 0;
+
+      if (!entriesError && allEntries) {
+        // Look for:
+        // 1. Hidden entries with CREDITS against opening balance
+        // 2. Or calculate from payment descriptions
+
+        for (const entry of allEntries) {
+          const desc = (entry.description || "").toLowerCase();
+
+          // Check hidden entries first
+          if (entry.is_hidden && desc.includes("opening") && entry.credit > 0) {
+            paidAmount += entry.credit;
+            console.log(`Found hidden opening balance credit: ${entry.credit}`);
+          }
+          // Also check payment descriptions
+          else if (
+            entry.type === "payment" &&
+            desc.includes("opening") &&
+            desc.includes("pkr")
+          ) {
+            // Try to extract amount from payment description
+            const match = desc.match(/pkr\s*([\d,]+)/);
+            if (match) {
+              const amountStr = match[1].replace(/,/g, "");
+              const amount = parseFloat(amountStr);
+              if (!isNaN(amount)) {
+                paidAmount += amount;
+                console.log(
+                  `Found opening balance in payment description: ${amount}`
+                );
+              }
+            }
+          }
+        }
+      }
+
+      const remainingAmount = Math.max(0, openingAmount - paidAmount);
+
+      console.log("🎯 CORRECTED Calculation:", {
+        openingAmount,
+        paidAmount,
+        remainingAmount,
+        status:
+          remainingAmount === 0
+            ? "✅ FULLY PAID"
+            : "⚠️ STILL OWES: " + remainingAmount,
+      });
+
+      return {
+        amount: openingAmount,
+        date: openingEntry.date,
+        isPositive: true,
+        paidAmount: paidAmount,
+        remainingAmount: remainingAmount,
+      };
+    } catch (error) {
+      console.error("❌ Error in getCustomerOpeningBalance:", error);
+      return {
+        amount: 0,
+        date: "",
+        isPositive: true,
+        paidAmount: 0,
+        remainingAmount: 0,
+      };
+    }
+  },
+
+  // Record opening balance payment
+  async recordOpeningBalancePayment(
+    customerId: string,
+    paymentId: string,
+    amount: number,
+    paymentDate: string
+  ): Promise<void> {
+    try {
+      console.log("=== Recording opening balance payment ===");
+      console.log("Customer:", customerId);
+      console.log("Payment:", paymentId);
+      console.log("Amount:", amount);
+      console.log("Date:", paymentDate);
+
+      if (amount <= 0) {
+        console.log("No opening balance payment to record");
+        return;
+      }
+
+      // First, try to insert into opening_balance_payments
+      const { error } = await supabase.from("opening_balance_payments").insert([
+        {
+          customer_id: customerId,
+          payment_id: paymentId,
+          amount: amount,
+          payment_date: paymentDate,
+        },
+      ]);
+
+      if (error) {
+        console.error("Error inserting into opening_balance_payments:", error);
+
+        // If table doesn't exist or has issues, update payment notes instead
+        console.log("Updating payment notes as fallback...");
+
+        // Get current payment
+        const { data: payment } = await supabase
+          .from("payments")
+          .select("notes")
+          .eq("id", paymentId)
+          .single();
+
+        let newNotes = `PKR ${amount.toLocaleString()} paid against opening balance.`;
+        if (payment?.notes) {
+          newNotes = payment.notes + "\n" + newNotes;
+        }
+
+        await supabase
+          .from("payments")
+          .update({ notes: newNotes })
+          .eq("id", paymentId);
+
+        console.log("Updated payment notes with opening balance info");
+      } else {
+        console.log(
+          "✅ Successfully recorded in opening_balance_payments table"
+        );
+      }
+    } catch (error) {
+      console.error("Error in recordOpeningBalancePayment:", error);
+      // Don't throw - this shouldn't fail the whole payment
+    }
+  },
+  // Add this helper function to sync existing opening balance payments
+  async syncExistingOpeningBalancePayments(customerId: string): Promise<void> {
+    try {
+      console.log("Syncing existing opening balance payments...");
+
+      // Get all payments with opening balance mentions
+      const { data: payments } = await supabase
+        .from("payments")
+        .select("id, payment_number, notes, total_received, payment_date")
+        .eq("customer_id", customerId)
+        .or("notes.ilike.%opening%,notes.ilike.%against%");
+
+      if (!payments || payments.length === 0) {
+        console.log("No payments to sync");
+        return;
+      }
+
+      for (const payment of payments) {
+        if (payment.notes) {
+          // Check if hidden entry already exists
+          const { data: existingHidden } = await supabase
+            .from("ledger_entries")
+            .select("id")
+            .eq("customer_id", customerId)
+            .eq("reference_id", payment.id)
+            .eq("type", "opening_balance_payment")
+            .eq("is_hidden", true)
+            .single();
+
+          if (!existingHidden) {
+            // Try to extract amount from notes
+            let amount = 0;
+            const notesLower = payment.notes.toLowerCase();
+
+            if (
+              notesLower.includes("100,000") ||
+              notesLower.includes("100000")
+            ) {
+              amount = 100000;
+            } else if (notesLower.includes("opening")) {
+              // If notes mention opening but no specific amount, check if it's the only payment
+              const { data: invoiceAllocations } = await supabase
+                .from("payment_allocations")
+                .select("amount")
+                .eq("payment_id", payment.id);
+
+              if (!invoiceAllocations || invoiceAllocations.length === 0) {
+                // No invoice allocations, so all might be against opening balance
+                amount = payment.total_received;
+              }
+            }
+
+            if (amount > 0) {
+              // Create hidden entry
+              await supabase.from("ledger_entries").insert([
+                {
+                  customer_id: customerId,
+                  date: payment.payment_date,
+                  type: "opening_balance_payment",
+                  reference_id: payment.id,
+                  reference_number: payment.payment_number,
+                  debit: amount,
+                  credit: 0,
+                  balance: 0,
+                  description: `Opening balance payment (hidden) - ${payment.payment_number}`,
+                  is_hidden: true,
+                },
+              ]);
+
+              console.log(
+                `Created hidden entry for ${payment.payment_number}: ${amount}`
+              );
+            }
+          }
+        }
+      }
+
+      console.log("Sync completed");
+    } catch (error) {
+      console.error("Error syncing:", error);
+    }
+  },
+  // Create customer payment - COMPLETE UPDATED VERSION with opening balance tracking
   async createCustomerPayment(paymentData: {
     customer_id: string;
     payment_date: string;
@@ -186,6 +439,7 @@ export const paymentService = {
     cheque_date?: string;
     notes?: string;
     invoice_allocations?: { invoice_id: string; amount: number }[];
+    opening_balance_allocation?: { amount: number; date: string };
   }): Promise<Payment> {
     try {
       console.log("Creating payment with data:", paymentData);
@@ -350,11 +604,55 @@ export const paymentService = {
 
       console.log("Payment created successfully:", payment);
 
-      // Create ledger entry for the payment
+      // Create ledger entry for the payment with detailed description
       try {
-        const ledgerDescription = `Payment ${payment.payment_number} received${
-          paymentStatus === "partial" ? " (Partial Payment)" : ""
-        }${paymentStatus === "pending" ? " (Pending Clearance)" : ""}`;
+        const hasOpeningBalanceAllocation =
+          paymentData.opening_balance_allocation?.amount > 0;
+        const hasInvoiceAllocations =
+          paymentData.invoice_allocations &&
+          paymentData.invoice_allocations.length > 0;
+
+        // Create a CLEAR description that shows allocation
+        let ledgerDescription = "";
+
+        if (hasOpeningBalanceAllocation && hasInvoiceAllocations) {
+          // Both opening balance and invoices
+          const invoiceTotal = paymentData.invoice_allocations!.reduce(
+            (sum, inv) => sum + inv.amount,
+            0
+          );
+          ledgerDescription = `Payment ${
+            payment.payment_number
+          } - PKR ${paymentData.opening_balance_allocation!.amount.toLocaleString()} to opening balance, PKR ${invoiceTotal.toLocaleString()} to ${
+            paymentData.invoice_allocations!.length
+          } invoice(s)`;
+        } else if (hasOpeningBalanceAllocation) {
+          // Only opening balance
+          ledgerDescription = `Payment ${
+            payment.payment_number
+          } - PKR ${paymentData.opening_balance_allocation!.amount.toLocaleString()} to opening balance`;
+        } else if (hasInvoiceAllocations) {
+          // Only invoices
+          const invoiceTotal = paymentData.invoice_allocations!.reduce(
+            (sum, inv) => sum + inv.amount,
+            0
+          );
+          ledgerDescription = `Payment ${
+            payment.payment_number
+          } - PKR ${invoiceTotal.toLocaleString()} to ${
+            paymentData.invoice_allocations!.length
+          } invoice(s)`;
+        } else {
+          // No allocations specified (shouldn't happen)
+          ledgerDescription = `Payment ${payment.payment_number} received`;
+        }
+
+        if (paymentStatus === "partial") {
+          ledgerDescription += " (Partial Payment)";
+        }
+        if (paymentStatus === "pending") {
+          ledgerDescription += " (Pending Clearance)";
+        }
 
         await ledgerService.addLedgerEntry({
           customer_id: paymentData.customer_id,
@@ -367,10 +665,44 @@ export const paymentService = {
           description: ledgerDescription,
         });
 
-        console.log("✅ Ledger entry created successfully");
+        console.log("✅ Ledger entry created:", ledgerDescription);
       } catch (ledgerError: any) {
         console.error("❌ Failed to create ledger entry:", ledgerError.message);
-        // Don't throw here, continue with invoice updates
+      }
+
+      // IMPORTANT: Record opening balance payment if any
+      if (paymentData.opening_balance_allocation?.amount) {
+        try {
+          const openingBalanceAmount =
+            paymentData.opening_balance_allocation.amount;
+
+          console.log(
+            `Creating hidden adjustment entry for opening balance: ${openingBalanceAmount}`
+          );
+
+          // IMPORTANT: This should be a CREDIT entry to reduce opening balance
+          // Opening balance is a DEBIT (asset/accounts receivable)
+          // To reduce it, we need a CREDIT
+
+          await supabase.from("ledger_entries").insert([
+            {
+              customer_id: paymentData.customer_id,
+              date: paymentData.payment_date,
+              type: "adjustment", // Use 'adjustment' type
+              reference_id: payment.id,
+              reference_number: payment.payment_number,
+              debit: 0, // ← ZERO DEBIT!
+              credit: openingBalanceAmount, // ← CREDIT to reduce opening balance!
+              balance: 0, // Will be recalculated by ledger service
+              description: `Opening balance payment (hidden) - ${payment.payment_number}`,
+              is_hidden: true, // Mark as hidden
+            },
+          ]);
+
+          console.log("✅ Hidden CREDIT adjustment entry created");
+        } catch (hiddenError) {
+          console.error("❌ Failed to create hidden adjustment:", hiddenError);
+        }
       }
 
       // Update invoice balances if we have allocations
@@ -400,7 +732,6 @@ export const paymentService = {
                 `❌ Error updating invoice ${allocation.invoice_id}:`,
                 invoiceError.message
               );
-              // Continue with other invoices even if one fails
             }
           }
         }
@@ -413,7 +744,8 @@ export const paymentService = {
           .select(
             `
             *,
-            customer:customers(*)
+            customer:customers(*),
+            allocations:payment_allocations(*)
           `
           )
           .eq("id", payment.id)
@@ -428,16 +760,7 @@ export const paymentService = {
           };
         }
 
-        // Get allocations if any
-        const { data: allocations } = await supabase
-          .from("payment_allocations")
-          .select("*")
-          .eq("payment_id", payment.id);
-
-        return {
-          ...fullPayment,
-          allocations: allocations || [],
-        };
+        return fullPayment;
       } catch (fetchError: any) {
         console.error("Error in final fetch:", fetchError);
         return {
@@ -622,7 +945,6 @@ export const paymentService = {
 
         for (const allocation of allocations) {
           // Check if this allocation is for an invoice
-          // We need to check the purpose or payee_type field
           const isInvoiceAllocation =
             allocation.payee_type === "invoice" ||
             (allocation.purpose && allocation.purpose.includes("invoice")) ||
@@ -767,7 +1089,40 @@ export const paymentService = {
         console.log("Note removing ledger entry:", ledgerError);
       }
 
-      // 2. Delete payment allocations (if any)
+      // 2. Delete hidden adjustment entries for opening balance payments
+      try {
+        console.log("Deleting hidden adjustment entries...");
+
+        // Delete ALL hidden entries for this payment
+        const { error: hiddenDeleteError } = await supabase
+          .from("ledger_entries")
+          .delete()
+          .eq("reference_id", id)
+          .eq("is_hidden", true);
+
+        if (hiddenDeleteError) {
+          console.error("Error deleting hidden entries:", hiddenDeleteError);
+
+          // Also try to delete by description pattern as fallback
+          if (payment.payment_number) {
+            const { error: descDeleteError } = await supabase
+              .from("ledger_entries")
+              .delete()
+              .like("description", `%${payment.payment_number}%`)
+              .eq("is_hidden", true);
+
+            if (descDeleteError) {
+              console.error("Error deleting by description:", descDeleteError);
+            }
+          }
+        } else {
+          console.log("Hidden adjustment entries deleted successfully");
+        }
+      } catch (hiddenError) {
+        console.error("Error deleting hidden entries:", hiddenError);
+      }
+
+      // 3. Delete payment allocations (if any)
       if (allocations && allocations.length > 0) {
         try {
           const { error: allocationsDeleteError } = await supabase
@@ -788,7 +1143,7 @@ export const paymentService = {
         }
       }
 
-      // 3. Finally delete the payment itself
+      // 4. Finally delete the payment itself
       const { error: deleteError } = await supabase
         .from("payments")
         .delete()
@@ -799,7 +1154,7 @@ export const paymentService = {
         throw new Error(`Failed to delete payment: ${deleteError.message}`);
       }
 
-      // 4. Recalculate customer balance after deletion
+      // 5. Recalculate customer balance after deletion
       try {
         await ledgerService.recalculateCustomerBalance(payment.customer_id);
         console.log("Customer balance recalculated after payment deletion");
@@ -1000,6 +1355,51 @@ export const paymentService = {
     } catch (error) {
       console.log("Error getting invoices paid by payment:", error);
       return [];
+    }
+  },
+
+  // Add this debug method to paymentService.ts temporarily:
+  async debugOpeningBalance(customerId: string): Promise<any> {
+    try {
+      console.log("=== DEBUG Opening Balance ===");
+      console.log("Customer ID:", customerId);
+
+      // 1. Check ledger entry
+      const { data: ledgerEntry, error: ledgerError } = await supabase
+        .from("ledger_entries")
+        .select("*")
+        .eq("customer_id", customerId)
+        .eq("type", "opening_balance")
+        .single();
+
+      console.log("Ledger Entry:", ledgerEntry);
+      console.log("Ledger Error:", ledgerError);
+
+      // 2. Check opening_balance_payments table
+      const { data: obPayments, error: obError } = await supabase
+        .from("opening_balance_payments")
+        .select("*")
+        .eq("customer_id", customerId);
+
+      console.log("Opening Balance Payments:", obPayments);
+      console.log("Opening Balance Payments Error:", obError);
+
+      // 3. Check all payments for this customer
+      const { data: allPayments, error: paymentsError } = await supabase
+        .from("payments")
+        .select("*")
+        .eq("customer_id", customerId);
+
+      console.log("All Payments:", allPayments);
+
+      return {
+        ledgerEntry,
+        obPayments,
+        allPayments,
+      };
+    } catch (error) {
+      console.error("Debug error:", error);
+      return null;
     }
   },
 };
