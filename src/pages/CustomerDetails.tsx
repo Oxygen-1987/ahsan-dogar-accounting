@@ -27,12 +27,14 @@ import {
   DeleteOutlined,
   DownOutlined,
   CreditCardOutlined,
+  TagOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { customerService } from "../services/customerService";
 import { invoiceService } from "../services/invoiceService";
 import { paymentService } from "../services/paymentService";
-import type { Customer, Invoice, Payment } from "../types";
+import { discountService } from "../services/discountService";
+import type { Customer, Invoice, Payment, DiscountEntry } from "../types";
 import dayjs from "dayjs";
 import CustomerSidePanel from "../components/customers/CustomerSidePanel";
 import PaymentSidePanel from "../components/payments/PaymentSidePanel";
@@ -48,7 +50,18 @@ const CustomerDetails: React.FC = () => {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [discounts, setDiscounts] = useState<DiscountEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingDiscounts, setLoadingDiscounts] = useState(false);
+
+  // Add state for opening balance
+  const [openingBalance, setOpeningBalance] = useState<{
+    amount: number;
+    date: string;
+    isPositive: boolean;
+    paidAmount: number;
+    remainingAmount: number;
+  } | null>(null);
 
   // State for side panels and modals
   const [sidePanelVisible, setSidePanelVisible] = useState(false);
@@ -63,8 +76,16 @@ const CustomerDetails: React.FC = () => {
       loadCustomerDetails();
       loadCustomerInvoices();
       loadCustomerPayments();
+      loadCustomerDiscounts();
     }
   }, [id]);
+
+  // Add this useEffect to load opening balance when customer is loaded
+  useEffect(() => {
+    if (customer && id) {
+      loadCustomerOpeningBalance();
+    }
+  }, [customer, id]);
 
   const loadCustomerDetails = async () => {
     try {
@@ -110,6 +131,35 @@ const CustomerDetails: React.FC = () => {
     } catch (error) {
       console.error("Error loading payments:", error);
       setPayments([]); // Set empty array on error
+    }
+  };
+
+  const loadCustomerDiscounts = async () => {
+    if (!id) return;
+
+    try {
+      setLoadingDiscounts(true);
+      const discountData = await discountService.getCustomerDiscounts(id);
+      setDiscounts(discountData);
+      console.log(`Loaded ${discountData.length} discounts for customer`);
+    } catch (error) {
+      console.error("Error loading discounts:", error);
+      setDiscounts([]);
+    } finally {
+      setLoadingDiscounts(false);
+    }
+  };
+
+  const loadCustomerOpeningBalance = async () => {
+    if (!id) return;
+
+    try {
+      const openingData = await customerService.getCustomerOpeningBalance(id);
+      console.log("Opening balance data loaded:", openingData);
+      setOpeningBalance(openingData);
+    } catch (error) {
+      console.error("Failed to load opening balance:", error);
+      setOpeningBalance(null);
     }
   };
 
@@ -285,6 +335,11 @@ const CustomerDetails: React.FC = () => {
     setReceivePaymentModalVisible(false);
     loadCustomerDetails(); // Refresh balances
     loadCustomerPayments(); // Refresh payments list
+    loadCustomerDiscounts(); // Refresh discounts list
+    loadCustomerInvoices(); // Refresh invoices
+    if (id) {
+      loadCustomerOpeningBalance(); // Refresh opening balance data
+    }
   };
 
   // Handler for viewing a payment
@@ -320,6 +375,11 @@ const CustomerDetails: React.FC = () => {
           loadCustomerPayments(); // Refresh payments list
           setPaymentSidePanelVisible(false); // Close side panel
           setSelectedPayment(null);
+          loadCustomerDiscounts(); // Refresh discounts
+          loadCustomerInvoices(); // Refresh invoices
+          if (id) {
+            loadCustomerOpeningBalance(); // Refresh opening balance
+          }
         } catch (error) {
           message.error("Failed to delete payment");
         }
@@ -330,6 +390,28 @@ const CustomerDetails: React.FC = () => {
   // Handler for payment reload
   const handlePaymentReload = () => {
     loadCustomerPayments(); // Refresh payments
+  };
+
+  // Handler for deleting a discount
+  const handleDeleteDiscount = async (discount: DiscountEntry) => {
+    Modal.confirm({
+      title: "Delete Discount",
+      content: `Are you sure you want to delete discount of PKR ${discount.amount.toLocaleString()}?`,
+      okText: "Delete",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: async () => {
+        try {
+          await discountService.deleteDiscount(discount.id);
+          message.success("Discount deleted successfully");
+          loadCustomerDiscounts();
+          loadCustomerDetails(); // Refresh balance
+          loadCustomerInvoices(); // Refresh invoices
+        } catch (error) {
+          message.error("Failed to delete discount");
+        }
+      },
+    });
   };
 
   // Invoice columns
@@ -469,6 +551,18 @@ const CustomerDetails: React.FC = () => {
       },
     },
     {
+      title: "Discount",
+      dataIndex: "discount_amount",
+      key: "discount_amount",
+      render: (amount: number) =>
+        amount > 0 ? (
+          <Text type="success">PKR {amount.toLocaleString()}</Text>
+        ) : (
+          <Text type="secondary">-</Text>
+        ),
+      align: "right",
+    },
+    {
       title: "Status",
       dataIndex: "status",
       key: "status",
@@ -500,6 +594,53 @@ const CustomerDetails: React.FC = () => {
     },
   ];
 
+  // Discount columns
+  const discountColumns = [
+    {
+      title: "Date",
+      dataIndex: "date",
+      key: "date",
+      render: (date: string) => dayjs(date).format("DD/MM/YYYY"),
+    },
+    {
+      title: "Amount",
+      dataIndex: "amount",
+      key: "amount",
+      render: (amount: number) => (
+        <Text strong style={{ color: "#52c41a" }}>
+          PKR {amount.toLocaleString()}
+        </Text>
+      ),
+      align: "right",
+    },
+    {
+      title: "Reason",
+      dataIndex: "reason",
+      key: "reason",
+      render: (reason: string) => reason || "Discount",
+    },
+    {
+      title: "Reference",
+      dataIndex: "reference_number",
+      key: "reference_number",
+      render: (ref: string) => <Tag color="purple">{ref || "N/A"}</Tag>,
+    },
+    {
+      title: "Action",
+      key: "action",
+      render: (_: any, record: DiscountEntry) => (
+        <Button
+          type="link"
+          icon={<DeleteOutlined />}
+          danger
+          onClick={() => handleDeleteDiscount(record)}
+        >
+          Delete
+        </Button>
+      ),
+    },
+  ];
+
   // Action menu for customer (REMOVED View Ledger from here)
   const getActionMenu = (): MenuProps => ({
     items: [
@@ -525,6 +666,12 @@ const CustomerDetails: React.FC = () => {
   if (!customer) {
     return null;
   }
+
+  // Calculate total discounts
+  const totalDiscounts = discounts.reduce(
+    (sum, discount) => sum + (discount.amount || 0),
+    0
+  );
 
   return (
     <div style={{ padding: "24px" }}>
@@ -628,11 +775,8 @@ const CustomerDetails: React.FC = () => {
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
-              title="Total Paid"
-              value={invoices.reduce(
-                (sum, inv) => sum + (inv.paid_amount || 0),
-                0
-              )}
+              title="Total Discounts"
+              value={totalDiscounts}
               prefix="PKR "
               valueStyle={{ color: "#52c41a" }}
             />
@@ -659,6 +803,37 @@ const CustomerDetails: React.FC = () => {
               <Descriptions.Item label="Contact Person">
                 {customer.first_name} {customer.last_name}
               </Descriptions.Item>
+
+              {/* Opening Balance Display */}
+              {openingBalance && (
+                <Descriptions.Item label="Opening Balance Details">
+                  <div>
+                    <div>
+                      Amount: PKR {openingBalance.amount.toLocaleString()}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#666" }}>
+                      {openingBalance.paidAmount > 0 ? (
+                        <span>
+                          (PKR {openingBalance.paidAmount.toLocaleString()}{" "}
+                          paid, PKR{" "}
+                          {openingBalance.remainingAmount.toLocaleString()}{" "}
+                          remaining)
+                        </span>
+                      ) : openingBalance.amount > 0 ? (
+                        <span>Full amount pending</span>
+                      ) : (
+                        <span>No opening balance</span>
+                      )}
+                    </div>
+                    {openingBalance.date && (
+                      <div style={{ fontSize: "12px", color: "#666" }}>
+                        Date: {dayjs(openingBalance.date).format("DD/MM/YYYY")}
+                      </div>
+                    )}
+                  </div>
+                </Descriptions.Item>
+              )}
+
               <Descriptions.Item label="Mobile">
                 {customer.mobile}
               </Descriptions.Item>
@@ -737,6 +912,50 @@ const CustomerDetails: React.FC = () => {
               pagination={{ pageSize: 10 }}
               locale={{
                 emptyText: "No payments found for this customer",
+              }}
+            />
+          </TabPane>
+
+          <TabPane
+            tab={
+              <Badge count={discounts.length} size="small">
+                <span>
+                  <TagOutlined />
+                  Discounts ({discounts.length})
+                </span>
+              </Badge>
+            }
+            key="discounts"
+          >
+            <Table
+              columns={discountColumns}
+              dataSource={discounts}
+              rowKey="id"
+              loading={loadingDiscounts}
+              pagination={{ pageSize: 10 }}
+              locale={{
+                emptyText: "No discounts found for this customer",
+              }}
+              summary={(pageData) => {
+                const total = pageData.reduce(
+                  (sum, item) => sum + (item.amount || 0),
+                  0
+                );
+                return (
+                  <Table.Summary>
+                    <Table.Summary.Row>
+                      <Table.Summary.Cell index={0} colSpan={2}>
+                        <Text strong>Total Discounts</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={1} align="right">
+                        <Text strong style={{ color: "#52c41a" }}>
+                          PKR {total.toLocaleString()}
+                        </Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={2} colSpan={3} />
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                );
               }}
             />
           </TabPane>

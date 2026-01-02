@@ -197,7 +197,13 @@ const InvoiceViewPanel: React.FC<InvoiceViewPanelProps> = ({
           }}
         >
           <Space>
-            <Button icon={<EditOutlined />} onClick={() => onEdit(invoice)}>
+            <Button
+              icon={<EditOutlined />}
+              onClick={() => {
+                onEdit(invoice);
+                onClose(); // Close the panel when editing
+              }}
+            >
               Edit Invoice
             </Button>
             {invoice.status === "draft" ? (

@@ -267,26 +267,73 @@ export const invoiceService = {
     }
   },
 
-  // Update invoice
-  async updateInvoice(
+  // Update invoice with ledger synchronization
+  async updateInvoiceWithLedger(
     id: string,
     updates: Partial<InvoiceFormData>
   ): Promise<Invoice> {
     try {
-      const total_amount = updates.line_items?.reduce(
-        (sum, item) => sum + (item.amount || 0),
-        0
+      // First get the current invoice to calculate differences
+      const { data: currentInvoice, error: fetchError } = await supabase
+        .from("invoices")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+      if (fetchError) {
+        console.log("Error fetching current invoice:", fetchError);
+        throw fetchError;
+      }
+
+      // Calculate new total
+      const newTotalAmount =
+        updates.line_items?.reduce(
+          (sum, item) => sum + (item.amount || 0),
+          0
+        ) || currentInvoice.total_amount;
+
+      // Calculate amount difference
+      const amountDifference = newTotalAmount - currentInvoice.total_amount;
+
+      console.log("Invoice update details:", {
+        currentTotal: currentInvoice.total_amount,
+        newTotal: newTotalAmount,
+        difference: amountDifference,
+        currentPaid: currentInvoice.paid_amount,
+        currentPending: currentInvoice.pending_amount,
+      });
+
+      // Calculate new pending amount (preserving paid amount)
+      const newPendingAmount = Math.max(
+        0,
+        newTotalAmount - currentInvoice.paid_amount
       );
 
-      const { data, error } = await supabase
+      // Update status based on new amounts
+      let newStatus: InvoiceStatus = currentInvoice.status;
+      if (newPendingAmount === 0) {
+        newStatus = "paid";
+      } else if (currentInvoice.paid_amount > 0 && newPendingAmount > 0) {
+        newStatus = "partial";
+      } else if (
+        newPendingAmount === newTotalAmount &&
+        currentInvoice.status !== "draft"
+      ) {
+        newStatus = "sent";
+      }
+
+      // Update the invoice in database
+      const { data: updatedInvoice, error: updateError } = await supabase
         .from("invoices")
         .update({
-          invoice_number: updates.invoice_number,
-          customer_id: updates.customer_id,
-          issue_date: updates.issue_date,
-          due_date: updates.due_date,
-          total_amount: total_amount,
-          pending_amount: total_amount,
+          invoice_number:
+            updates.invoice_number || currentInvoice.invoice_number,
+          customer_id: updates.customer_id || currentInvoice.customer_id,
+          issue_date: updates.issue_date || currentInvoice.issue_date,
+          due_date: updates.due_date || currentInvoice.due_date,
+          total_amount: newTotalAmount,
+          pending_amount: newPendingAmount,
+          status: newStatus,
           notes: updates.notes,
           payment_terms: updates.payment_terms,
           updated_at: new Date().toISOString(),
@@ -300,13 +347,13 @@ export const invoiceService = {
         )
         .single();
 
-      if (error) {
-        console.log("Supabase update error:", error);
-        throw error;
+      if (updateError) {
+        console.log("Supabase update error:", updateError);
+        throw updateError;
       }
 
       // Update line items
-      if (updates.line_items && updates.line_items.length > 0) {
+      if (updates.line_items) {
         // First delete existing line items
         await supabase.from("invoice_items").delete().eq("invoice_id", id);
 
@@ -329,14 +376,68 @@ export const invoiceService = {
         }
       }
 
+      // Update ledger if amount changed or customer changed
+      if (
+        amountDifference !== 0 ||
+        updates.customer_id !== currentInvoice.customer_id
+      ) {
+        console.log("Amount or customer changed, updating ledger...");
+
+        // Remove the old ledger entry
+        await ledgerService.removeLedgerEntry(id, "invoice");
+
+        // Create new ledger entry with updated amount
+        const targetCustomerId =
+          updates.customer_id || currentInvoice.customer_id;
+        const ledgerResult = await ledgerService.addLedgerEntry({
+          customer_id: targetCustomerId,
+          date: updates.issue_date || currentInvoice.issue_date,
+          type: "invoice",
+          reference_id: id,
+          reference_number:
+            updates.invoice_number || currentInvoice.invoice_number,
+          debit: newTotalAmount,
+          credit: 0,
+          description: `Invoice ${
+            updates.invoice_number || currentInvoice.invoice_number
+          } updated`,
+        });
+
+        if (ledgerResult) {
+          console.log("✅ Ledger entry updated for invoice");
+        } else {
+          console.log("⚠️ Ledger entry was not updated");
+        }
+
+        // If customer changed, recalculate balances for both old and new customers
+        if (
+          updates.customer_id &&
+          updates.customer_id !== currentInvoice.customer_id
+        ) {
+          console.log("Customer changed, recalculating balances...");
+          await ledgerService.recalculateCustomerBalance(
+            currentInvoice.customer_id
+          );
+          await ledgerService.recalculateCustomerBalance(updates.customer_id);
+        }
+      }
+
       return {
-        ...data,
+        ...updatedInvoice,
         items: updates.line_items || [],
       };
     } catch (error) {
-      console.log("Error updating invoice:", error);
+      console.log("Error updating invoice with ledger:", error);
       throw error;
     }
+  },
+
+  // Update invoice (wrapper for backward compatibility)
+  async updateInvoice(
+    id: string,
+    updates: Partial<InvoiceFormData>
+  ): Promise<Invoice> {
+    return this.updateInvoiceWithLedger(id, updates);
   },
 
   // Delete invoice
@@ -530,7 +631,7 @@ export const invoiceService = {
     }
   },
 
-  // Add this method to invoiceService.ts
+  // Reverse invoice payment
   async reverseInvoicePayment(
     invoiceId: string,
     paymentAmount: number
@@ -614,7 +715,64 @@ export const invoiceService = {
     }
   },
 
-  // Add this to invoiceService.ts
+  // Reverse discount on invoice
+  async reverseDiscount(invoiceId: string, amount: number): Promise<void> {
+    try {
+      console.log(`Reversing discount ${amount} on invoice ${invoiceId}`);
+
+      const { data: invoice, error: invoiceError } = await supabase
+        .from("invoices")
+        .select("discount_amount, pending_amount")
+        .eq("id", invoiceId)
+        .single();
+
+      if (invoiceError || !invoice) {
+        console.error("Invoice not found or error:", invoiceError);
+        throw new Error("Invoice not found");
+      }
+
+      console.log("Current invoice before discount reversal:", {
+        discountAmount: invoice.discount_amount,
+        pendingAmount: invoice.pending_amount,
+      });
+
+      // Calculate new amounts
+      const newDiscountAmount = Math.max(
+        0,
+        (invoice.discount_amount || 0) - amount
+      );
+      const newPendingAmount = (invoice.pending_amount || 0) + amount;
+
+      console.log("After discount reversal:", {
+        newDiscountAmount,
+        newPendingAmount,
+      });
+
+      // Update invoice
+      const { error: updateError } = await supabase
+        .from("invoices")
+        .update({
+          discount_amount: newDiscountAmount,
+          pending_amount: newPendingAmount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", invoiceId);
+
+      if (updateError) {
+        console.error("Error updating invoice:", updateError);
+        throw updateError;
+      }
+
+      console.log(
+        `✅ Discount reversed on invoice ${invoiceId}: PKR ${amount}`
+      );
+    } catch (error) {
+      console.error("Error reversing discount on invoice:", error);
+      throw error;
+    }
+  },
+
+  // Debug invoice balance
   async debugInvoiceBalance(invoiceId: string): Promise<void> {
     try {
       const { data: invoice } = await supabase
@@ -646,5 +804,99 @@ export const invoiceService = {
 
     console.log("Database invoices for customer:", invoices);
     console.log("=== END DEBUG ===");
+  },
+
+  // Additional helper method: Get invoices by customer
+  async getInvoicesByCustomer(customerId: string): Promise<Invoice[]> {
+    try {
+      const { data: invoices, error } = await supabase
+        .from("invoices")
+        .select(
+          `
+          *,
+          customer:customers(*)
+        `
+        )
+        .eq("customer_id", customerId)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.log("Error getting invoices by customer:", error);
+        throw error;
+      }
+
+      // Load line items for each invoice
+      const invoicesWithItems = await Promise.all(
+        (invoices || []).map(async (invoice) => {
+          const { data: lineItems } = await supabase
+            .from("invoice_items")
+            .select("*")
+            .eq("invoice_id", invoice.id);
+
+          return {
+            ...invoice,
+            items: lineItems || [],
+            customer: invoice.customer || undefined,
+          };
+        })
+      );
+
+      return invoicesWithItems;
+    } catch (error) {
+      console.log("Error in getInvoicesByCustomer:", error);
+      throw error;
+    }
+  },
+
+  // Get invoice statistics
+  async getInvoiceStats(customerId?: string): Promise<{
+    totalInvoices: number;
+    totalAmount: number;
+    paidAmount: number;
+    pendingAmount: number;
+    draftCount: number;
+    sentCount: number;
+    paidCount: number;
+    partialCount: number;
+    overdueCount: number;
+  }> {
+    try {
+      let query = supabase.from("invoices").select("*");
+
+      if (customerId) {
+        query = query.eq("customer_id", customerId);
+      }
+
+      const { data: invoices, error } = await query;
+
+      if (error) {
+        console.log("Error getting invoice stats:", error);
+        throw error;
+      }
+
+      const stats = {
+        totalInvoices: invoices?.length || 0,
+        totalAmount:
+          invoices?.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) || 0,
+        paidAmount:
+          invoices?.reduce((sum, inv) => sum + (inv.paid_amount || 0), 0) || 0,
+        pendingAmount:
+          invoices?.reduce((sum, inv) => sum + (inv.pending_amount || 0), 0) ||
+          0,
+        draftCount:
+          invoices?.filter((inv) => inv.status === "draft").length || 0,
+        sentCount: invoices?.filter((inv) => inv.status === "sent").length || 0,
+        paidCount: invoices?.filter((inv) => inv.status === "paid").length || 0,
+        partialCount:
+          invoices?.filter((inv) => inv.status === "partial").length || 0,
+        overdueCount:
+          invoices?.filter((inv) => inv.status === "overdue").length || 0,
+      };
+
+      return stats;
+    } catch (error) {
+      console.log("Error in getInvoiceStats:", error);
+      throw error;
+    }
   },
 };

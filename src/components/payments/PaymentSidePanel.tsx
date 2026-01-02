@@ -21,7 +21,7 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
 } from "@ant-design/icons";
-import type { Payment, PaymentAllocation } from "../../types";
+import type { Payment, PaymentDistribution } from "../../types";
 import { paymentService } from "../../services/paymentService";
 import dayjs from "dayjs";
 import EditPaymentModal from "./EditPaymentModal";
@@ -30,7 +30,7 @@ interface PaymentSidePanelProps {
   visible: boolean;
   onClose: () => void;
   payment: Payment | null;
-  onAllocate: (payment: Payment) => void;
+  onDistribute: (payment: Payment) => void; // Changed from onAllocate
   onEdit: (payment: Payment) => void;
   onDelete: (payment: Payment) => void;
   onReload: () => void;
@@ -40,7 +40,7 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
   visible,
   onClose,
   payment,
-  onAllocate,
+  onDistribute, // Changed from onAllocate
   onEdit,
   onDelete,
   onReload,
@@ -49,6 +49,17 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
   const [showEditModal, setShowEditModal] = useState(false);
 
   if (!payment) return null;
+
+  // Add the canDistribute function here
+  const canDistribute = () => {
+    if (
+      payment.payment_method === "cheque" ||
+      payment.payment_method === "parchi"
+    ) {
+      return payment.status === "completed" || payment.status === "partial";
+    }
+    return payment.status === "completed" || payment.status === "partial";
+  };
 
   const getPaymentMethodColor = (method: string) => {
     const colors: Record<string, string> = {
@@ -67,6 +78,7 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
       pending: "orange",
       completed: "green",
       cancelled: "red",
+      partial: "blue",
     };
     return colors[status] || "default";
   };
@@ -158,18 +170,21 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
     message.success("Payment updated successfully");
   };
 
-  const allocationColumns = [
+  const distributionColumns = [
     {
       title: "Payee",
       dataIndex: "payee_name",
       key: "payee_name",
-      render: (text: string, record: PaymentAllocation) => (
+      render: (
+        text: string,
+        record: PaymentDistribution // Changed type
+      ) => (
         <div>
           <div>
             <strong>{text}</strong>
           </div>
           <Tag color="blue" style={{ marginTop: 4 }}>
-            {record.payee_type.toUpperCase()}
+            {record.payee_type?.toUpperCase() || "UNKNOWN"}
           </Tag>
         </div>
       ),
@@ -197,9 +212,9 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
     },
   ];
 
-  const totalAllocated =
-    payment.allocations?.reduce((sum, alloc) => sum + alloc.amount, 0) || 0;
-  const remainingAmount = payment.total_received - totalAllocated;
+  const totalDistributed = // Changed from totalAllocated
+    payment.distributions?.reduce((sum, dist) => sum + dist.amount, 0) || 0;
+  const remainingAmount = payment.total_received - totalDistributed;
 
   return (
     <>
@@ -241,7 +256,7 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
               alignItems: "center",
             }}
           >
-            {/* Left side - Allocate and Status buttons */}
+            {/* Left side - Distribute and Status buttons */}
             <Space>
               {(payment.payment_method === "cheque" ||
                 payment.payment_method === "parchi") &&
@@ -254,13 +269,13 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
                     Mark as Completed
                   </Button>
                 )}
-              {canAllocate() && (
+              {canDistribute() && (
                 <Button
                   icon={<DollarOutlined />}
                   type="primary"
-                  onClick={() => onAllocate(payment)}
+                  onClick={() => onDistribute(payment)} // Changed from onAllocate
                 >
-                  Allocate Funds
+                  Distribute Funds
                 </Button>
               )}
             </Space>
@@ -350,7 +365,7 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
 
           <Divider />
 
-          {/* Allocation Summary */}
+          {/* Distribution Summary */}
           <Card size="small" style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <div>
@@ -360,9 +375,9 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
                 </strong>
               </div>
               <div>
-                <div>Allocated</div>
+                <div>Distributed</div> {/* Changed from Allocated */}
                 <strong style={{ fontSize: "16px", color: "#1890ff" }}>
-                  PKR {totalAllocated.toLocaleString()}
+                  PKR {totalDistributed.toLocaleString()}
                 </strong>
               </div>
               <div>
@@ -379,15 +394,15 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
             </div>
           </Card>
 
-          {/* Allocations */}
+          {/* Distributions */}
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontWeight: "500", marginBottom: 12 }}>
-              Payment Allocations
+              Payment Distributions {/* Changed from Allocations */}
             </div>
-            {payment.allocations && payment.allocations.length > 0 ? (
+            {payment.distributions && payment.distributions.length > 0 ? (
               <Table
-                columns={allocationColumns}
-                dataSource={payment.allocations}
+                columns={distributionColumns}
+                dataSource={payment.distributions}
                 pagination={false}
                 size="small"
                 rowKey="id"
@@ -402,7 +417,7 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
                   borderRadius: "6px",
                 }}
               >
-                No allocations found for this payment
+                No distributions found for this payment
               </div>
             )}
           </div>
@@ -437,20 +452,20 @@ const PaymentSidePanel: React.FC<PaymentSidePanelProps> = ({
                 </div>
               </Timeline.Item>
             )}
-            {payment.allocations &&
-              payment.allocations.map((alloc, index) => (
+            {payment.distributions &&
+              payment.distributions.map((dist, index) => (
                 <Timeline.Item
-                  key={alloc.id}
+                  key={dist.id}
                   dot={<DollarOutlined style={{ fontSize: "16px" }} />}
                   color="green"
                 >
-                  <div>Allocated to {alloc.payee_name}</div>
+                  <div>Distributed to {dist.payee_name}</div>
                   <div style={{ fontSize: "12px", color: "#666" }}>
-                    {dayjs(alloc.allocation_date).format("DD/MM/YYYY")} - PKR{" "}
-                    {alloc.amount.toLocaleString()}
+                    {dayjs(dist.allocation_date).format("DD/MM/YYYY")} - PKR{" "}
+                    {dist.amount.toLocaleString()}
                   </div>
                   <div style={{ fontSize: "12px", color: "#666" }}>
-                    Purpose: {alloc.purpose}
+                    Purpose: {dist.purpose}
                   </div>
                 </Timeline.Item>
               ))}

@@ -401,6 +401,10 @@ const Customers: React.FC = () => {
           <div style={{ fontSize: "12px", color: "#666" }}>
             {record.first_name} {record.last_name}
           </div>
+          {/* Add opening balance info */}
+          <div style={{ fontSize: "11px", color: "#faad14", marginTop: 2 }}>
+            Opening: PKR {(record.opening_balance || 0).toLocaleString()}
+          </div>
         </div>
       ),
     },

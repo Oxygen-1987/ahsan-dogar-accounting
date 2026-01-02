@@ -123,29 +123,53 @@ export type PaymentMethod =
 // Payment Status types
 export type PaymentStatus = "pending" | "completed" | "cancelled" | "partial";
 
-// Payee types for allocations
+// NEW: Payee types for distributions (renamed from allocations)
 export type PayeeType = "supplier" | "expense" | "owner" | "other";
 
-// Allocation Status types
-export type AllocationStatus = "allocated" | "cancelled";
+// NEW: Distribution Status types (renamed from allocations)
+export type DistributionStatus = "allocated" | "cancelled";
 
 // Payment Form Data
 export interface PaymentFormData {
-  invoice_id: string;
+  invoice_id?: string;
   customer_id: string;
   payment_date: string;
   total_received: number;
+  discount_amount?: number;
+  discount_reason?: string;
   payment_method: PaymentMethod;
   reference_number?: string;
   bank_name?: string;
   cheque_date?: string;
   status: PaymentStatus;
   notes?: string;
-  allocations: PaymentAllocationFormData[];
+  applications?: CustomerPaymentApplication[]; // NEW: For customer payments to invoices/opening balance
+  distributions?: PaymentDistribution[]; // NEW: For internal allocations (renamed)
 }
 
-// Payment Allocation Form Data
-export interface PaymentAllocationFormData {
+// NEW: Customer Payment Application Form Data
+export interface CustomerPaymentApplicationFormData {
+  payment_id: string;
+  customer_id: string;
+  invoice_id?: string; // NULL for opening balance payments
+  amount: number;
+  application_date: string;
+  notes?: string;
+}
+
+// NEW: Customer Payment Application
+export interface CustomerPaymentApplication extends BaseEntity {
+  payment_id: string;
+  customer_id: string;
+  invoice_id?: string; // NULL for opening balance payments
+  amount: number;
+  application_date: string;
+  notes?: string;
+  invoice?: Invoice; // Optional relation
+}
+
+// NEW: Payment Distribution Form Data (renamed from PaymentAllocation)
+export interface PaymentDistributionFormData {
   payee_name: string;
   payee_type: PayeeType;
   amount: number;
@@ -154,10 +178,22 @@ export interface PaymentAllocationFormData {
   notes?: string;
 }
 
+// NEW: Payment Distribution (renamed from PaymentAllocation)
+export interface PaymentDistribution extends BaseEntity {
+  payment_id: string;
+  payee_name: string;
+  payee_type: PayeeType;
+  amount: number;
+  purpose: string;
+  allocation_date: string;
+  status: DistributionStatus;
+  notes?: string;
+}
+
 // Payment interface
 export interface Payment extends BaseEntity {
   payment_number: string;
-  invoice_id: string;
+  invoice_id?: string;
   invoice?: Invoice;
   customer_id: string;
   customer?: Customer;
@@ -169,20 +205,10 @@ export interface Payment extends BaseEntity {
   cheque_date?: string;
   status: PaymentStatus;
   notes?: string;
-  allocations?: PaymentAllocation[];
-}
-
-// Payment Allocation
-export interface PaymentAllocation extends BaseEntity {
-  payment_id: string;
-  payment?: Payment;
-  payee_name: string;
-  payee_type: PayeeType;
-  amount: number;
-  purpose: string;
-  allocation_date: string;
-  status: AllocationStatus;
-  notes?: string;
+  discount_amount?: number;
+  net_received?: number;
+  applications?: CustomerPaymentApplication[]; // NEW: for customer payments
+  distributions?: PaymentDistribution[]; // NEW: for internal allocations (renamed)
 }
 
 // Ledger Entry
@@ -190,14 +216,27 @@ export interface LedgerEntry extends BaseEntity {
   customer_id: string;
   customer?: Customer;
   date: string;
-  type: "invoice" | "payment" | "adjustment" | "opening_balance_payment";
+  type: "invoice" | "payment" | "adjustment" | "opening_balance" | "discount";
   reference_id: string;
   reference_number: string;
   debit: number;
   credit: number;
   balance: number;
   description: string;
-  is_hidden?: boolean; // Add this
+  is_hidden?: boolean;
+  invoice_id?: string;
+}
+
+export interface DiscountEntry {
+  id: string;
+  customer_id: string;
+  invoice_id?: string;
+  date: string;
+  amount: number;
+  reason?: string;
+  created_at: string;
+  updated_at: string;
+  reference_number?: string;
 }
 
 // Expense types
@@ -232,7 +271,7 @@ export interface CompanySettings extends BaseEntity {
   payment_prefix?: string;
 }
 
-// Add Opening Balance Entry type
+// Opening Balance Entry type
 export interface OpeningBalanceEntry {
   customer_id: string;
   date: string;
@@ -244,7 +283,7 @@ export interface OpeningBalanceEntry {
   balance: number;
 }
 
-// Add for PDF generation
+// For PDF generation
 export interface CustomerLedgerData {
   customer: Customer;
   entries: LedgerEntry[];
@@ -256,4 +295,13 @@ export interface CustomerLedgerData {
     periodStart?: string;
     periodEnd?: string;
   };
+}
+
+// NEW: Opening Balance Summary
+export interface OpeningBalanceSummary {
+  originalAmount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  asOfDate: string;
+  payments: CustomerPaymentApplication[];
 }

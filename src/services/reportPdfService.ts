@@ -270,12 +270,12 @@ export const reportPdfService = {
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
 
-    const subtitleText = "Payment Allocations and Summaries";
+    const subtitleText = "Payment Distributions and Summaries"; // Updated
     const subtitleWidth = doc.getTextWidth(subtitleText);
     const subtitleX = (pageWidth - subtitleWidth) / 2;
 
     // Draw highlight background for subtitle
-    doc.setFillColor(52, 152, 219); // Different blue for variety
+    doc.setFillColor(52, 152, 219);
     doc.roundedRect(subtitleX - 8, 28, subtitleWidth + 16, 10, 3, 3, "F");
 
     // Draw subtitle text
@@ -307,7 +307,7 @@ export const reportPdfService = {
       { align: "right" }
     );
 
-    // Prepare table data
+    // Prepare table data - UPDATED FIELD NAMES
     const tableData = data.map((item, index) => {
       const payment = item.payment;
       return [
@@ -317,15 +317,18 @@ export const reportPdfService = {
         payment.customer?.company_name?.substring(0, 25) || "-",
         payment.reference_number?.substring(0, 15) || "-",
         this.formatCurrency(payment.total_received || 0, false),
-        this.formatCurrency(item.totalAllocated || 0, false),
+        this.formatCurrency(
+          item.totalDistributed || item.totalDistributed || 0,
+          false
+        ), // Updated
         this.formatCurrency(item.remainingAmount || 0, false),
-        item.allocationCount?.toString() || "0",
+        item.distributionCount || item.distributionCount || "0", // Updated
         payment.payment_method?.toUpperCase() || "-",
         payment.status?.toUpperCase() || "-",
       ];
     });
 
-    // Table headers
+    // Table headers - UPDATED
     const headers = [
       "#",
       "Payment No",
@@ -333,38 +336,37 @@ export const reportPdfService = {
       "Customer",
       "Reference",
       "Total Received",
-      "Allocated",
+      "Distributed", // Changed
       "Remaining",
-      "Allocations",
+      "Distributions", // Changed
       "Method",
       "Status",
     ];
 
-    // Generate table WITHOUT summary row
+    // Generate table
     autoTable(doc, {
       head: headers,
       body: tableData,
-      startY: summaryY + 8,
+      startY: 55,
       margin: { left: margin, right: margin },
       theme: "grid",
-      tableWidth: "wrap", // Add this line to wrap table width
+      tableWidth: "wrap",
       styles: {
-        fontSize: 10, // Increased font size
+        fontSize: 10,
         cellPadding: 4,
         overflow: "linebreak",
         lineColor: [200, 200, 200],
         lineWidth: 0.2,
         valign: "middle",
-        fontStyle: "bold", // Bold all table text
       },
       headStyles: {
-        fillColor: [52, 152, 219], // Different blue for variety
+        fillColor: [52, 152, 219],
         textColor: 255,
         fontStyle: "bold",
         fontSize: 10,
         halign: "center",
         valign: "middle",
-        lineColor: [52, 152, 219], // Seamless header
+        lineColor: [52, 152, 219],
         lineWidth: 0.5,
       },
       alternateRowStyles: {
@@ -409,18 +411,18 @@ export const reportPdfService = {
     doc.setFont("helvetica", "bold");
     doc.text("REPORT SUMMARY", margin, finalY);
 
-    doc.setDrawColor(52, 152, 219); // Blue separator line
+    doc.setDrawColor(52, 152, 219);
     doc.setLineWidth(0.5);
     doc.line(margin, finalY + 3, pageWidth - margin, finalY + 3);
 
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
 
-    // Summary details
+    // Summary details - UPDATED
     const detailsY = finalY + 12;
-    const allocationPercent =
+    const distributionPercent = // Updated variable name
       totals.totalReceived > 0
-        ? ((totals.totalAllocated / totals.totalReceived) * 100).toFixed(1)
+        ? ((totals.totalDistributed / totals.totalReceived) * 100).toFixed(1)
         : "0.0";
 
     // First row
@@ -431,7 +433,10 @@ export const reportPdfService = {
       detailsY
     );
     doc.text(
-      `Total Allocated: ${this.formatCurrency(totals.totalAllocated, true)}`,
+      `Total Distributed: ${this.formatCurrency(
+        totals.totalDistributed,
+        true
+      )}`, // Updated
       margin + 160,
       detailsY
     );
@@ -443,7 +448,11 @@ export const reportPdfService = {
 
     // Second row
     doc.setFont("helvetica", "bold");
-    doc.text(`Allocation Rate: ${allocationPercent}%`, margin, detailsY + 8);
+    doc.text(
+      `Distribution Rate: ${distributionPercent}%`,
+      margin,
+      detailsY + 8
+    ); // Updated
 
     // Payment statistics - third row
     const completedPayments = data.filter(
@@ -485,7 +494,7 @@ export const reportPdfService = {
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
 
-    const subtitleText = "Comprehensive Payment Allocations and Details";
+    const subtitleText = "Comprehensive Payment Distributions and Details";
     const subtitleWidth = doc.getTextWidth(subtitleText);
     const subtitleX = (pageWidth - subtitleWidth) / 2;
 
@@ -629,7 +638,7 @@ export const reportPdfService = {
 
       currentY += Math.max(detailsLeft.length, detailsRight.length) * 6 + 10;
 
-      // Allocation summary box
+      // Distribution summary box
       doc.setFillColor(245, 245, 245);
       doc.rect(margin, currentY, pageWidth - 2 * margin, 20, "F");
       doc.setDrawColor(220, 220, 220);
@@ -653,12 +662,12 @@ export const reportPdfService = {
         { align: "center" }
       );
 
-      // Allocated
+      // Distributed
       doc.setFontSize(11);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(60, 60, 60);
       doc.text(
-        "ALLOCATED",
+        "DISTRIBUTED",
         margin + summaryWidth + summaryWidth / 2,
         currentY + 8,
         { align: "center" }
@@ -666,7 +675,7 @@ export const reportPdfService = {
       doc.setFontSize(12);
       doc.setTextColor(24, 144, 255);
       doc.text(
-        `PKR ${item.totalAllocated.toLocaleString()}`,
+        `PKR ${item.totalDistributed.toLocaleString()}`,
         margin + summaryWidth + summaryWidth / 2,
         currentY + 16,
         { align: "center" }
@@ -699,30 +708,32 @@ export const reportPdfService = {
 
       currentY += 25;
 
-      // Allocations table
-      if (item.payment.allocations && item.payment.allocations.length > 0) {
+      // Distributions table
+      if (item.payment.distributions && item.payment.distributions.length > 0) {
         doc.setFontSize(12);
         doc.setFont("helvetica", "bold");
         doc.setTextColor(60, 60, 60);
-        doc.text("PAYMENT ALLOCATIONS", margin, currentY);
+        doc.text("PAYMENT DISTRIBUTIONS", margin, currentY);
 
         currentY += 8;
 
-        const allocationData = item.payment.allocations.map(
-          (alloc: any, allocIndex: number) => [
-            (allocIndex + 1).toString(),
-            alloc.payee_name,
-            alloc.payee_type.toUpperCase(),
-            alloc.purpose || "-",
-            `PKR ${alloc.amount.toLocaleString()}`,
-            dayjs(alloc.allocation_date).format("DD/MM/YY"),
-            alloc.notes || "-",
+        const distributionData = item.payment.distributions.map(
+          // Line 283 - Changed
+          (dist: any, distIndex: number) => [
+            // Changed variable name
+            (distIndex + 1).toString(),
+            dist.payee_name,
+            dist.payee_type.toUpperCase(),
+            dist.purpose || "-",
+            `PKR ${dist.amount.toLocaleString()}`,
+            dayjs(dist.distribution_date).format("DD/MM/YY"),
+            dist.notes || "-",
           ]
         );
 
         autoTable(doc, {
           head: [["#", "Payee", "Type", "Purpose", "Amount", "Date", "Notes"]],
-          body: allocationData,
+          body: distributionData, // Line 295 - Changed
           startY: currentY,
           margin: { left: margin, right: margin },
           theme: "grid",
@@ -756,7 +767,7 @@ export const reportPdfService = {
         doc.setFontSize(10);
         doc.setFont("helvetica", "italic");
         doc.setTextColor(150, 150, 150);
-        doc.text("No allocations found for this payment", margin, currentY);
+        doc.text("No distributions found for this payment", margin, currentY);
         currentY += 10;
       }
 
@@ -799,12 +810,12 @@ export const reportPdfService = {
     const summaryData = [
       ["Total Payments", data.length.toString()],
       ["Total Received", `PKR ${totals.totalReceived.toLocaleString()}`],
-      ["Total Allocated", `PKR ${totals.totalAllocated.toLocaleString()}`],
+      ["Total Distributed", `PKR ${totals.totalDistributed.toLocaleString()}`], // Changed
       ["Total Remaining", `PKR ${totals.remainingAmount.toLocaleString()}`],
       [
-        "Allocation Rate",
+        "Distribution Rate", // Changed
         totals.totalReceived > 0
-          ? `${((totals.totalAllocated / totals.totalReceived) * 100).toFixed(
+          ? `${((totals.totalDistributed / totals.totalReceived) * 100).toFixed(
               1
             )}%`
           : "0%",
@@ -1025,11 +1036,11 @@ export const reportPdfService = {
 
     currentY += 5;
 
-    // Allocation Summary
+    // Distribution Summary
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(60, 60, 60);
-    doc.text("ALLOCATION SUMMARY", margin, currentY);
+    doc.text("DISTRIBUTION SUMMARY", margin, currentY);
     currentY += 10;
 
     const summaryWidth = (pageWidth - 2 * margin) / 3;
@@ -1058,12 +1069,12 @@ export const reportPdfService = {
       { align: "center" }
     );
 
-    // Allocated
+    // Distributed
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(60, 60, 60);
     doc.text(
-      "ALLOCATED",
+      "DISTRIBUTED",
       margin + summaryWidth + summaryWidth / 2 - 2.5,
       currentY + 8,
       { align: "center" }
@@ -1071,7 +1082,7 @@ export const reportPdfService = {
     doc.setFontSize(12);
     doc.setTextColor(24, 144, 255);
     doc.text(
-      `PKR ${paymentDetail.totalAllocated.toLocaleString()}`,
+      `PKR ${paymentDetail.totalDistributed.toLocaleString()}`,
       margin + summaryWidth + summaryWidth / 2 - 2.5,
       currentY + 18,
       { align: "center" }
@@ -1104,28 +1115,31 @@ export const reportPdfService = {
 
     currentY += 30;
 
-    // Allocations table
-    if (payment.allocations && payment.allocations.length > 0) {
+    // Distributions table
+    if (payment.distributions && payment.distributions.length > 0) {
+      // Changed
       doc.setFontSize(12);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(60, 60, 60);
-      doc.text("PAYMENT ALLOCATIONS", margin, currentY);
+      doc.text("PAYMENT DISTRIBUTIONS", margin, currentY); // Changed
       currentY += 8;
 
-      const allocationData = payment.allocations.map(
-        (alloc: any, index: number) => [
+      const distributionData = payment.distributions.map(
+        // Changed
+        (dist: any, index: number) => [
+          // Changed variable name
           (index + 1).toString(),
-          alloc.payee_name,
-          alloc.payee_type.toUpperCase(),
-          `PKR ${alloc.amount.toLocaleString()}`,
-          dayjs(alloc.allocation_date).format("DD/MM/YYYY"),
-          alloc.purpose || "-",
+          dist.payee_name,
+          dist.payee_type.toUpperCase(),
+          `PKR ${dist.amount.toLocaleString()}`,
+          dayjs(dist.distribution_date).format("DD/MM/YYYY"),
+          dist.purpose || "-",
         ]
       );
 
       autoTable(doc, {
         head: [["#", "Payee", "Type", "Amount", "Date", "Purpose"]],
-        body: allocationData,
+        body: distributionData, // Changed
         startY: currentY,
         margin: { left: margin, right: margin },
         theme: "grid",

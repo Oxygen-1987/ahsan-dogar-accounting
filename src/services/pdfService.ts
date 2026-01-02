@@ -153,27 +153,55 @@ export const pdfService = {
 
       // Format entries for table - clean up opening balance description
       const tableData = entries.map((entry, index) => {
-        // Format opening balance description
-        let description = entry.description || "";
-        if (
-          entry.type.toLowerCase().includes("opening") ||
-          description.toLowerCase().includes("opening") ||
-          description.toLowerCase().includes("balance")
-        ) {
-          // Clean up opening balance description
-          const dateMatch = description.match(/\d{2}\/\d{2}\/\d{4}/);
-          if (dateMatch) {
-            description = `Opening Balance as of ${dateMatch[0]}`;
-          } else {
-            // Use entry date if no date in description
-            description = `Opening Balance as of ${dayjs(entry.date).format(
-              "DD/MM/YYYY"
-            )}`;
-          }
+        // Format description based on type
+        let description = "";
+
+        switch (entry.type) {
+          case "opening_balance":
+            description = "Opening Balance";
+            break;
+
+          case "invoice":
+            const invoiceNumber =
+              entry.reference_number ||
+              (entry.description?.match(/INV-\d+-\d+/) || [])[0] ||
+              "Invoice";
+            description = `Invoice ${invoiceNumber}`;
+            break;
+
+          case "payment":
+            const paymentNumber =
+              entry.reference_number ||
+              (entry.description?.match(/PAY-\d+-\d+/) || [])[0] ||
+              "Payment";
+            description = `Payment ${paymentNumber}`;
+            break;
+
+          case "discount":
+            const discountInvoiceMatch = entry.description?.match(
+              /invoice\s+([A-Z0-9-]+)/i
+            );
+            const discountInvoice = discountInvoiceMatch
+              ? discountInvoiceMatch[1]
+              : "Invoice";
+            description = `Discount on ${discountInvoice}`;
+            break;
+
+          default:
+            description = entry.description || "";
+            // Clean up verbose descriptions
+            if (description.includes("PKR") && description.includes("to")) {
+              description = description.split("PKR")[0].trim();
+            }
+            if (description.includes("(")) {
+              description = description.split("(")[0].trim();
+            }
+            break;
         }
 
+        // Return WITHOUT serial number - we'll add it in drawLandscapeTable
         return [
-          (index + 1).toString(),
+          "", // Empty string for serial number - will be filled later
           dayjs(entry.date).format("DD/MM/YYYY"),
           description,
           entry.debit > 0 ? this.formatCurrencyFull(entry.debit, false) : "-",
@@ -192,12 +220,19 @@ export const pdfService = {
         "Balance",
       ];
 
-      // Fixed column widths for landscape - Updated for new layout
+      // Calculate column widths dynamically
       const availableWidth = pageWidth - margin * 2;
+
+      // Determine how wide serial number column needs to be
+      const maxSerialNumber = entries.length;
+      const serialNumberDigits = maxSerialNumber.toString().length;
+      // Allow 8mm per digit plus padding
+      const serialColWidth = Math.max(20, serialNumberDigits * 8 + 8);
+
       const columnWidths = [
-        15, // # (increased for better spacing)
-        35, // Date (increased to ensure full date visibility)
-        availableWidth - (15 + 35 + 45 + 45 + 50), // Description (dynamic width)
+        serialColWidth, // # - Dynamic width based on number of entries
+        35, // Date
+        availableWidth - (serialColWidth + 35 + 45 + 45 + 50), // Description
         45, // Debit
         45, // Credit
         50, // Balance
@@ -377,10 +412,13 @@ export const pdfService = {
     primaryColor: number[],
     pageHeight: number
   ): number {
-    const rowHeight = 10; // Increased row height
-    const headerHeight = 12; // Increased header height
+    const rowHeight = 10;
+    const headerHeight = 12;
     let currentY = startY;
     const totalWidth = columnWidths.reduce((sum, w) => sum + w, 0);
+
+    // Track serial number across pages
+    let globalSerialNumber = 0;
 
     // Draw main table border
     doc.setDrawColor(200, 200, 200);
@@ -392,20 +430,20 @@ export const pdfService = {
     doc.rect(startX, startY, totalWidth, headerHeight, "F");
 
     // Draw header text
-    doc.setFontSize(14); // Increased font size
+    doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(255, 255, 255);
 
     let xPos = startX;
     headers.forEach((header, index) => {
       const cellWidth = columnWidths[index];
-      const isNumeric = index >= 3; // Debit, Credit, Balance columns
+      const isNumeric = index >= 3;
       const align = isNumeric
         ? "right"
         : index === 0 || index === 1
         ? "center"
         : "left";
-      const padding = 6; // Increased padding
+      const padding = 6;
 
       let textX = xPos + padding;
       if (isNumeric) {
@@ -417,9 +455,9 @@ export const pdfService = {
       const headerText = doc.splitTextToSize(header, cellWidth - padding * 2);
       doc.text(headerText, textX, startY + 8, { align: align as any });
 
-      // DRAW VERTICAL LINES BETWEEN HEADER COLUMNS
+      // Draw vertical lines between header columns
       if (index < headers.length - 1) {
-        doc.setDrawColor(230, 230, 230); // Light gray for vertical lines
+        doc.setDrawColor(230, 230, 230);
         doc.setLineWidth(0.1);
         const lineX = xPos + cellWidth;
         doc.line(lineX, startY, lineX, startY + headerHeight);
@@ -436,11 +474,14 @@ export const pdfService = {
     doc.line(startX, currentY, startX + totalWidth, currentY);
 
     // Draw data rows
-    data.forEach((row, rowIndex) => {
+    for (let rowIndex = 0; rowIndex < data.length; rowIndex++) {
       // Check if we need a new page
       if (currentY + rowHeight > pageHeight - 25) {
         doc.addPage();
         currentY = 15;
+
+        // Reset xPos for new page
+        xPos = startX;
 
         // Redraw table border and header on new page
         doc.setDrawColor(200, 200, 200);
@@ -451,8 +492,8 @@ export const pdfService = {
         doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
         doc.rect(startX, currentY, totalWidth, headerHeight, "F");
 
-        xPos = startX;
-        doc.setFontSize(12);
+        // Redraw headers on new page
+        doc.setFontSize(14);
         doc.setFont("helvetica", "bold");
         doc.setTextColor(255, 255, 255);
 
@@ -479,7 +520,7 @@ export const pdfService = {
           );
           doc.text(headerText, textX, currentY + 8, { align: align as any });
 
-          // DRAW VERTICAL LINES BETWEEN HEADER COLUMNS ON NEW PAGE
+          // Draw vertical lines between header columns on new page
           if (index < headers.length - 1) {
             doc.setDrawColor(230, 230, 230);
             doc.setLineWidth(0.1);
@@ -496,7 +537,18 @@ export const pdfService = {
         doc.setDrawColor(255, 255, 255);
         doc.setLineWidth(0.5);
         doc.line(startX, currentY, startX + totalWidth, currentY);
+
+        // Reset xPos for data rows
+        xPos = startX;
       }
+
+      // Increment serial number
+      globalSerialNumber++;
+
+      // Get the current row data
+      const row = [...data[rowIndex]]; // Create a copy
+      // Update the serial number in the row
+      row[0] = globalSerialNumber.toString();
 
       // Alternate row background
       if (rowIndex % 2 === 0) {
@@ -517,7 +569,13 @@ export const pdfService = {
           : colIndex === 0 || colIndex === 1
           ? "center"
           : "left";
-        const padding = 6;
+
+        // ADJUST PADDING FOR SERIAL NUMBER COLUMN
+        let padding = 6;
+        if (colIndex === 0) {
+          // Serial number column
+          padding = 4; // Less padding for serial numbers
+        }
 
         let textX = xPos + padding;
         if (isNumeric) {
@@ -526,9 +584,40 @@ export const pdfService = {
           textX = xPos + cellWidth / 2;
         }
 
-        // Set font style and color - UPDATED FOR DEBIT/CREDIT COLORS
+        // Set font style and color
         doc.setFontSize(12);
-        if (colIndex === 3) {
+
+        if (colIndex === 2) {
+          // Description column
+          // Check description type for coloring
+          if (typeof cell === "string") {
+            const cellLower = cell.toLowerCase();
+            if (cellLower.startsWith("payment")) {
+              doc.setFont("helvetica", "bold");
+              doc.setTextColor(39, 174, 96); // Green for payments
+            } else if (cellLower.startsWith("discount")) {
+              doc.setFont("helvetica", "bold");
+              doc.setTextColor(241, 196, 15); // Yellow for discounts
+            } else if (cellLower.includes("opening balance")) {
+              doc.setFont("helvetica", "bold");
+              doc.setTextColor(52, 152, 219); // Blue for opening balance
+            } else if (cellLower.startsWith("invoice")) {
+              doc.setFont("helvetica", "bold");
+              doc.setTextColor(155, 89, 182); // Purple for invoices
+            } else {
+              doc.setFont("helvetica", "normal");
+              doc.setTextColor(60, 60, 60);
+            }
+          }
+        } else if (colIndex === 0) {
+          // Serial number column
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(100, 100, 100);
+        } else if (colIndex === 1) {
+          // Date column
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(100, 100, 100);
+        } else if (colIndex === 3) {
           // Debit column
           doc.setFont("helvetica", "bold");
           doc.setTextColor(231, 76, 60); // Red for debits
@@ -540,22 +629,16 @@ export const pdfService = {
           // Balance column
           doc.setFont("helvetica", "bold");
           // Determine color based on balance value
-          const balanceValue = row[5]; // Get the balance value from the row
+          const balanceValue = row[5];
           const isNegative =
             typeof balanceValue === "string"
               ? balanceValue.includes("CR")
-              : balanceValue < 0;
+              : false;
           if (isNegative) {
             doc.setTextColor(231, 76, 60); // Red for negative/CR balance
           } else {
             doc.setTextColor(39, 174, 96); // Green for positive balance
           }
-        } else if (colIndex === 0 || colIndex === 1) {
-          doc.setFont("helvetica", "bold");
-          doc.setTextColor(100, 100, 100);
-        } else if (colIndex === 2) {
-          doc.setFont("helvetica", "bold");
-          doc.setTextColor(60, 60, 60);
         } else {
           doc.setFont("helvetica", "normal");
           doc.setTextColor(60, 60, 60);
@@ -563,9 +646,8 @@ export const pdfService = {
 
         // Process cell content
         let displayText = cell.toString();
-        if (colIndex === 1 && displayText.length === 10) {
-          displayText = displayText;
-        }
+
+        // Truncate long descriptions
         if (colIndex === 2 && displayText.length > 65) {
           displayText = displayText.substring(0, 65) + "...";
         }
@@ -582,9 +664,9 @@ export const pdfService = {
           });
         }
 
-        // DRAW VERTICAL LINES BETWEEN COLUMNS IN DATA ROWS
+        // Draw vertical lines between columns
         if (colIndex < row.length - 1) {
-          doc.setDrawColor(169, 169, 169); // Light gray for vertical lines
+          doc.setDrawColor(169, 169, 169);
           doc.setLineWidth(0.1);
           const lineX = xPos + cellWidth;
           doc.line(lineX, currentY, lineX, currentY + rowHeight);
@@ -594,7 +676,7 @@ export const pdfService = {
       });
 
       // Draw horizontal line between rows
-      doc.setDrawColor(169, 169, 169); // Slightly darker gray for horizontal lines
+      doc.setDrawColor(169, 169, 169);
       doc.setLineWidth(0.3);
       doc.line(
         startX,
@@ -604,7 +686,7 @@ export const pdfService = {
       );
 
       currentY += rowHeight;
-    });
+    }
 
     return currentY;
   },
@@ -688,8 +770,8 @@ export const pdfService = {
 
     // Format with commas for thousands and 2 decimal places
     const formatted = absAmount.toLocaleString("en-PK", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
     });
 
     return `${includePKR ? "PKR " : ""}${formatted}${isNegative ? " CR" : ""}`;

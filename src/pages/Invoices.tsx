@@ -352,7 +352,7 @@ const Invoices: React.FC = () => {
               e.stopPropagation();
               e.preventDefault();
               console.log("Editing invoice:", record.id);
-              navigate(`/create-invoice/${record.id}`);
+              navigate(`/invoices/edit/${record.id}`); // Fixed route
             }}
             title="Edit Invoice"
           />

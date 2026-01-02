@@ -55,7 +55,7 @@ const Payments: React.FC = () => {
   // Modals and panels
   const [isReceivePaymentModalVisible, setIsReceivePaymentModalVisible] =
     useState(false);
-  const [isAllocationModalVisible, setIsAllocationModalVisible] =
+  const [isDistributionModalVisible, setIsDistributionModalVisible] = // Changed
     useState(false);
   const [isSidePanelVisible, setIsSidePanelVisible] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
@@ -73,7 +73,6 @@ const Payments: React.FC = () => {
     } catch (error) {
       console.error("Failed to load payments:", error);
       message.error("Failed to load payments");
-      // Set empty arrays on error
       setPayments([]);
       setSummary({});
     } finally {
@@ -98,6 +97,7 @@ const Payments: React.FC = () => {
       pending: "orange",
       completed: "green",
       cancelled: "red",
+      partial: "blue",
     };
     return colors[status];
   };
@@ -107,9 +107,10 @@ const Payments: React.FC = () => {
     setIsSidePanelVisible(true);
   };
 
-  const handleAddAllocation = (payment: Payment) => {
+  const handleAddDistribution = (payment: Payment) => {
+    // Changed
     setSelectedPayment(payment);
-    setIsAllocationModalVisible(true);
+    setIsDistributionModalVisible(true);
   };
 
   const handleReceivePayment = () => {
@@ -120,7 +121,6 @@ const Payments: React.FC = () => {
     handleViewPayment(record);
   };
 
-  // Handle delete payment - simplified version
   const handleDeletePayment = async (payment: Payment) => {
     Modal.confirm({
       title: "Delete Payment",
@@ -142,15 +142,12 @@ const Payments: React.FC = () => {
       onOk: async () => {
         try {
           console.log("Deleting payment:", payment.id);
-
-          // Show loading
           const hideLoading = message.loading({
             content: "Deleting payment...",
             key: "deletePayment",
             duration: 0,
           });
 
-          // Delete the payment
           await paymentService.deletePayment(payment.id);
 
           message.success({
@@ -159,26 +156,25 @@ const Payments: React.FC = () => {
             duration: 3,
           });
 
-          // Refresh the payments list
           await loadPayments();
 
-          // Close any open modals/panels showing this payment
           if (selectedPayment?.id === payment.id) {
             setIsSidePanelVisible(false);
             setSelectedPayment(null);
           }
-          if (isAllocationModalVisible && selectedPayment?.id === payment.id) {
-            setIsAllocationModalVisible(false);
+          if (
+            isDistributionModalVisible &&
+            selectedPayment?.id === payment.id
+          ) {
+            setIsDistributionModalVisible(false);
             setSelectedPayment(null);
           }
         } catch (error: any) {
           console.error("Delete payment error:", error);
-
           let errorMessage = "Failed to delete payment";
           if (error.message) {
             errorMessage += `: ${error.message}`;
           }
-
           message.error({
             content: errorMessage,
             key: "deletePayment",
@@ -250,18 +246,22 @@ const Payments: React.FC = () => {
       ),
     },
     {
-      title: "Allocations",
-      key: "allocations",
+      title: "Distributions", // Changed
+      key: "distributions",
       render: (_, record) => {
-        const totalAllocated =
-          record.allocations?.reduce((sum, alloc) => sum + alloc.amount, 0) ||
-          0;
-        const remaining = record.total_received - totalAllocated;
+        const totalDistributed =
+          record.distributions?.reduce(
+            // Changed
+            (sum, dist) => sum + dist.amount,
+            0
+          ) || 0;
+        const remaining = record.total_received - totalDistributed;
 
         return (
           <div>
             <div>
-              Allocated: <strong>PKR {totalAllocated.toLocaleString()}</strong>
+              Distributed:{" "}
+              <strong>PKR {totalDistributed.toLocaleString()}</strong>
             </div>
             <div style={{ fontSize: "12px", color: "#666" }}>
               Remaining:{" "}
@@ -278,14 +278,14 @@ const Payments: React.FC = () => {
       key: "actions",
       width: 200,
       render: (_, record) => {
-        const canAllocate = () => {
+        const canDistribute = () => {
+          // Changed
           if (
             record.payment_method === "cheque" ||
             record.payment_method === "parchi"
           ) {
             return record.status === "completed" || record.status === "partial";
           }
-          // For other payment methods, allow allocation if status is completed OR partial
           return record.status === "completed" || record.status === "partial";
         };
 
@@ -298,14 +298,14 @@ const Payments: React.FC = () => {
             >
               View
             </Button>
-            {canAllocate() && (
+            {canDistribute() && (
               <Button
                 icon={<DollarOutlined />}
                 size="small"
                 type="primary"
-                onClick={() => handleAddAllocation(record)}
+                onClick={() => handleAddDistribution(record)} // Changed
               >
-                Allocate
+                Distribute
               </Button>
             )}
             <Popconfirm
@@ -363,7 +363,7 @@ const Payments: React.FC = () => {
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ margin: 0 }}>Payment Management</h1>
         <p style={{ margin: 0, color: "#666" }}>
-          Receive payments and allocate funds to suppliers and expenses
+          Receive payments and distribute funds to suppliers and expenses
         </p>
       </div>
 
@@ -392,8 +392,8 @@ const Payments: React.FC = () => {
         <Col span={6}>
           <Card>
             <Statistic
-              title="Total Allocated"
-              value={summary.totalAllocated || 0}
+              title="Total Distributed" // Changed
+              value={summary.totalDistributed || 0}
               precision={0}
               prefix="PKR"
               valueStyle={{ color: "#1890ff" }}
@@ -403,8 +403,8 @@ const Payments: React.FC = () => {
         <Col span={6}>
           <Card>
             <Statistic
-              title="Pending Allocation"
-              value={summary.pendingAllocation || 0}
+              title="Available for Distribution" // Changed
+              value={summary.availableForDistribution || 0}
               precision={0}
               prefix="PKR"
               valueStyle={{ color: "#faad14" }}
@@ -453,7 +453,7 @@ const Payments: React.FC = () => {
               <Option value="all">All Status</Option>
               <Option value="pending">Pending</Option>
               <Option value="completed">Completed</Option>
-              <Option value="partial">Partial</Option> {/* Add this line */}
+              <Option value="partial">Partial</Option>
               <Option value="cancelled">Cancelled</Option>
             </Select>
           </Col>
@@ -494,7 +494,6 @@ const Payments: React.FC = () => {
           loading={loading}
           onRow={(record) => ({
             onClick: (e) => {
-              // Prevent row click when clicking on buttons
               if (
                 (e.target as HTMLElement).closest("button") ||
                 (e.target as HTMLElement).closest(".ant-popover") ||
@@ -519,20 +518,20 @@ const Payments: React.FC = () => {
         visible={isReceivePaymentModalVisible}
         onCancel={() => setIsReceivePaymentModalVisible(false)}
         onSuccess={() => {
-          loadPayments(); // This refreshes the payments table
+          loadPayments();
           message.success("Payment received successfully");
         }}
       />
 
-      {/* Allocation Modal */}
-      <AllocationModal
-        visible={isAllocationModalVisible}
+      {/* Distribution Modal */}
+      <DistributionModal // Changed from AllocationModal
+        visible={isDistributionModalVisible} // Changed
         payment={selectedPayment}
-        onCancel={() => setIsAllocationModalVisible(false)}
+        onCancel={() => setIsDistributionModalVisible(false)} // Changed
         onSuccess={() => {
           loadPayments();
-          setIsAllocationModalVisible(false);
-          message.success("Allocation added successfully");
+          setIsDistributionModalVisible(false); // Changed
+          message.success("Distribution added successfully"); // Changed
         }}
       />
 
@@ -544,12 +543,8 @@ const Payments: React.FC = () => {
           setSelectedPayment(null);
         }}
         payment={selectedPayment}
-        onAllocate={(payment) => {
-          setIsSidePanelVisible(false);
-          handleAddAllocation(payment);
-        }}
+        onDistribute={handleAddDistribution} // Changed from onAllocate
         onEdit={() => {
-          // Edit functionality can be implemented later
           message.info("Edit payment functionality coming soon");
         }}
         onDelete={handleDeletePayment}
@@ -559,15 +554,17 @@ const Payments: React.FC = () => {
   );
 };
 
-// Allocation Modal Component (keep the same as before)
-interface AllocationModalProps {
+// Distribution Modal Component (renamed from AllocationModal)
+interface DistributionModalProps {
+  // Changed
   visible: boolean;
   payment: Payment | null;
   onCancel: () => void;
   onSuccess: () => void;
 }
 
-const AllocationModal: React.FC<AllocationModalProps> = ({
+const DistributionModal: React.FC<DistributionModalProps> = ({
+  // Changed
   visible,
   payment,
   onCancel,
@@ -584,36 +581,32 @@ const AllocationModal: React.FC<AllocationModalProps> = ({
 
   const availableAmount = payment
     ? payment.total_received -
-      (payment.allocations?.reduce((sum, alloc) => sum + alloc.amount, 0) || 0)
+      (payment.distributions?.reduce((sum, dist) => sum + dist.amount, 0) || 0) // Changed
     : 0;
 
   const handleSubmit = async (values: any) => {
     if (!payment) return;
 
     if (values.amount > availableAmount) {
-      message.error("Allocation amount cannot exceed available amount");
+      message.error("Distribution amount cannot exceed available amount");
       return;
     }
 
     setLoading(true);
     try {
-      await paymentService.addAllocation(payment.id, {
+      await paymentService.addDistribution(payment.id, {
+        // Changed
         ...values,
         allocation_date: values.allocation_date.format("YYYY-MM-DD"),
       });
 
-      // Show success message
-      message.success("Allocation added successfully");
-
-      // Call onSuccess to refresh parent component
+      message.success("Distribution added successfully"); // Changed
       onSuccess();
-
-      // Close the modal
       onCancel();
     } catch (error: any) {
-      console.error("Failed to add allocation:", error);
+      console.error("Failed to add distribution:", error); // Changed
       message.error(
-        `Failed to add allocation: ${error.message || "Unknown error"}`
+        `Failed to add distribution: ${error.message || "Unknown error"}` // Changed
       );
     } finally {
       setLoading(false);
@@ -629,7 +622,7 @@ const AllocationModal: React.FC<AllocationModalProps> = ({
 
   return (
     <Modal
-      title="Add Payment Allocation"
+      title="Add Payment Distribution" // Changed
       open={visible}
       onCancel={handleCancel}
       footer={null}
@@ -646,7 +639,7 @@ const AllocationModal: React.FC<AllocationModalProps> = ({
       >
         <strong>Payment: {payment.payment_number}</strong>
         <br />
-        <span>Available for allocation: </span>
+        <span>Available for distribution: </span> {/* Changed */}
         <strong style={{ color: "#00b96b" }}>
           PKR {availableAmount.toLocaleString()}
         </strong>
@@ -709,13 +702,18 @@ const AllocationModal: React.FC<AllocationModalProps> = ({
           label="Purpose"
           rules={[{ required: true, message: "Please enter purpose" }]}
         >
-          <Input.TextArea placeholder="Enter purpose of allocation" rows={3} />
+          <Input.TextArea
+            placeholder="Enter purpose of distribution" // Changed
+            rows={3}
+          />
         </Form.Item>
 
         <Form.Item
           name="allocation_date"
-          label="Allocation Date"
-          rules={[{ required: true, message: "Please select allocation date" }]}
+          label="Distribution Date" // Changed
+          rules={[
+            { required: true, message: "Please select distribution date" }, // Changed
+          ]}
         >
           <DatePicker style={{ width: "100%" }} format="DD/MM/YYYY" />
         </Form.Item>
@@ -727,7 +725,7 @@ const AllocationModal: React.FC<AllocationModalProps> = ({
         <Form.Item>
           <Space>
             <Button type="primary" htmlType="submit" loading={loading}>
-              Add Allocation
+              Add Distribution {/* Changed */}
             </Button>
             <Button onClick={handleCancel}>Cancel</Button>
           </Space>

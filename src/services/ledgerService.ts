@@ -3,7 +3,7 @@ import type { LedgerEntry } from "../types";
 import dayjs from "dayjs";
 
 export const ledgerService = {
-  // Get customer ledger with proper balance calculation
+  // Get customer ledger with proper balance calculation (exclude hidden entries)
   async getCustomerLedger(customerId: string): Promise<LedgerEntry[]> {
     try {
       console.log("Getting ledger for customer:", customerId);
@@ -21,7 +21,7 @@ export const ledgerService = {
         return [];
       }
 
-      // Calculate running balance properly
+      // Calculate running balance properly (customer-facing view)
       let runningBalance = 0;
       const entriesWithBalances = (entries || []).map((entry) => {
         runningBalance =
@@ -39,7 +39,7 @@ export const ledgerService = {
     }
   },
 
-  // Get customer ledger with date range
+  // Get customer ledger with date range (exclude hidden entries)
   async getCustomerLedgerByDate(
     customerId: string,
     startDate?: string,
@@ -49,7 +49,8 @@ export const ledgerService = {
       let query = supabase
         .from("ledger_entries")
         .select("*")
-        .eq("customer_id", customerId);
+        .eq("customer_id", customerId)
+        .eq("is_hidden", false); // EXCLUDE hidden entries
 
       if (startDate) {
         query = query.gte("date", startDate);
@@ -87,7 +88,7 @@ export const ledgerService = {
     }
   },
 
-  // Get ledger summary for a customer
+  // Get ledger summary for a customer (exclude hidden entries)
   async getLedgerSummary(
     customerId: string,
     startDate?: string,
@@ -144,22 +145,23 @@ export const ledgerService = {
     }
   },
 
-  // Add a ledger entry with optimized balance calculation
+  // Add a ledger entry with correct balance calculation
   async addLedgerEntry(entry: {
     customer_id: string;
     date: string;
-    type: "invoice" | "payment" | "adjustment";
+    type: string;
     reference_id: string;
     reference_number: string;
     debit: number;
     credit: number;
     description: string;
+    is_hidden?: boolean;
   }): Promise<LedgerEntry | null> {
     try {
       console.log("📝 Creating ledger entry:", entry);
 
-      // Get the latest balance for this customer
-      const { data: latestEntry, error: balanceError } = await supabase
+      // Get the latest balance (any entry, hidden or not)
+      const { data: latestEntry } = await supabase
         .from("ledger_entries")
         .select("balance")
         .eq("customer_id", entry.customer_id)
@@ -169,51 +171,52 @@ export const ledgerService = {
         .single();
 
       let previousBalance = 0;
-      if (!balanceError && latestEntry) {
+      if (latestEntry) {
         previousBalance = latestEntry.balance || 0;
       }
 
-      const newBalance = previousBalance + entry.debit - entry.credit;
+      console.log("Previous balance:", previousBalance);
 
-      console.log("Balance calculation:", {
-        previousBalance,
-        debit: entry.debit,
-        credit: entry.credit,
-        newBalance,
-      });
+      // Calculate new balance
+      let newBalance = previousBalance;
 
-      // Insert the ledger entry
+      if (entry.is_hidden) {
+        // CRITICAL: Hidden entries INHERIT the previous balance
+        newBalance = previousBalance;
+        console.log("Hidden entry - INHERITING balance:", newBalance);
+      } else {
+        // Non-hidden entries: calculate normally
+        newBalance = previousBalance + entry.debit - entry.credit;
+        console.log("Non-hidden entry - calculating:", {
+          previousBalance,
+          debit: entry.debit,
+          credit: entry.credit,
+          newBalance,
+        });
+      }
+
+      // Insert with calculated balance
       const { data, error } = await supabase
         .from("ledger_entries")
         .insert([
           {
-            customer_id: entry.customer_id,
-            date: entry.date,
-            type: entry.type,
-            reference_id: entry.reference_id,
-            reference_number: entry.reference_number,
-            debit: entry.debit,
-            credit: entry.credit,
-            balance: newBalance,
-            description: entry.description,
+            ...entry,
+            balance: newBalance, // This should be correct now
           },
         ])
         .select()
         .single();
 
       if (error) {
-        console.error("❌ Database error adding ledger entry:", error);
+        console.error("❌ Database error:", error);
         return null;
       }
 
-      console.log("✅ Ledger entry added to database:", data);
+      console.log("✅ Ledger entry added:", data);
 
-      // Update customer balance
-      try {
-        await this.updateCustomerBalance(entry.customer_id, newBalance);
-        console.log("✅ Customer balance updated");
-      } catch (balanceError) {
-        console.error("Note: Could not update customer balance:", balanceError);
+      // Update customer balance ONLY if non-hidden
+      if (!entry.is_hidden) {
+        await this.updateCustomerBalance(entry.customer_id);
       }
 
       return data;
@@ -223,24 +226,43 @@ export const ledgerService = {
     }
   },
 
-  // Update customer balance
-  async updateCustomerBalance(
-    customerId: string,
-    newBalance: number
-  ): Promise<void> {
+  // Update customer balance based on last NON-HIDDEN ledger entry
+  async updateCustomerBalance(customerId: string): Promise<void> {
     try {
-      console.log("Updating customer balance:", { customerId, newBalance });
+      console.log("Updating customer balance for:", customerId);
 
-      const { error } = await supabase
+      // Get last NON-HIDDEN balance
+      const { data: lastNonHiddenEntry, error } = await supabase
+        .from("ledger_entries")
+        .select("balance")
+        .eq("customer_id", customerId)
+        .eq("is_hidden", false) // CRITICAL: Only non-hidden entries!
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error) {
+        console.error("Error finding last non-hidden entry:", error);
+        return;
+      }
+
+      const lastBalance = lastNonHiddenEntry?.balance || 0;
+      console.log("Last NON-HIDDEN balance:", lastBalance);
+
+      // Update customer with last non-hidden balance
+      const { error: updateError } = await supabase
         .from("customers")
         .update({
-          current_balance: newBalance,
+          current_balance: lastBalance,
           updated_at: new Date().toISOString(),
         })
         .eq("id", customerId);
 
-      if (error) {
-        console.error("Error updating customer balance:", error);
+      if (updateError) {
+        console.error("Error updating customer balance:", updateError);
+      } else {
+        console.log("✅ Customer balance updated to:", lastBalance);
       }
     } catch (error) {
       console.error("Error in updateCustomerBalance:", error);
@@ -280,40 +302,35 @@ export const ledgerService = {
     }
   },
 
-  // Recalculate customer balance from ledger entries
+  // Recalculate customer balance from LAST NON-HIDDEN ledger entry
   async recalculateCustomerBalance(customerId: string): Promise<number> {
     try {
       console.log("Recalculating balance for customer:", customerId);
 
-      // Get ALL ledger entries in correct order
-      const { data: entries, error } = await supabase
+      // Get last NON-HIDDEN ledger entry
+      const { data: lastNonHiddenEntry, error: lastEntryError } = await supabase
         .from("ledger_entries")
-        .select("*")
+        .select("balance")
         .eq("customer_id", customerId)
-        .order("date", { ascending: true })
-        .order("created_at", { ascending: true });
+        .eq("is_hidden", false) // CRITICAL: Only non-hidden!
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
 
-      if (error) {
-        console.error("Error fetching entries:", error);
+      if (lastEntryError) {
+        console.error("Error finding last non-hidden entry:", lastEntryError);
         return 0;
       }
 
-      // Calculate running balance
-      let runningBalance = 0;
-      if (entries && entries.length > 0) {
-        entries.forEach((entry) => {
-          runningBalance =
-            runningBalance + (entry.debit || 0) - (entry.credit || 0);
-        });
-      }
-
-      console.log("Calculated new balance:", runningBalance);
+      const lastBalance = lastNonHiddenEntry?.balance || 0;
+      console.log("Last NON-HIDDEN balance in ledger:", lastBalance);
 
       // Update customer
       const { error: updateError } = await supabase
         .from("customers")
         .update({
-          current_balance: runningBalance,
+          current_balance: lastBalance,
           updated_at: new Date().toISOString(),
         })
         .eq("id", customerId);
@@ -322,7 +339,7 @@ export const ledgerService = {
         console.error("Error updating customer balance:", updateError);
       }
 
-      return runningBalance;
+      return lastBalance;
     } catch (error) {
       console.error("Error in recalculateCustomerBalance:", error);
       return 0;
@@ -381,7 +398,7 @@ export const ledgerService = {
         await this.addLedgerEntry({
           customer_id: customerId,
           date: asOfDate,
-          type: "opening_balance", // Changed from "adjustment"
+          type: "opening_balance",
           reference_id: customerId,
           reference_number: "OPENING",
           debit: openingBalance > 0 ? Math.abs(openingBalance) : 0,
@@ -395,7 +412,7 @@ export const ledgerService = {
     }
   },
 
-  // Add this method to ledgerService
+  // Ensure opening balance entry exists
   async ensureOpeningBalanceEntry(
     customerId: string,
     openingBalance: number,
@@ -439,6 +456,88 @@ export const ledgerService = {
       }
     } catch (error) {
       console.error("Error ensuring opening balance entry:", error);
+    }
+  },
+
+  // Helper: Get customer's current balance from ledger (non-hidden only)
+  async getCustomerCurrentBalance(customerId: string): Promise<number> {
+    try {
+      const { data: lastNonHiddenEntry } = await supabase
+        .from("ledger_entries")
+        .select("balance")
+        .eq("customer_id", customerId)
+        .eq("is_hidden", false)
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      return lastNonHiddenEntry?.balance || 0;
+    } catch (error) {
+      console.error("Error getting customer current balance:", error);
+      return 0;
+    }
+  },
+
+  // Debug: Check balance consistency
+  async debugBalanceConsistency(customerId: string): Promise<any> {
+    try {
+      console.log("=== DEBUG BALANCE CONSISTENCY ===");
+
+      // 1. Get customer
+      const { data: customer } = await supabase
+        .from("customers")
+        .select("*")
+        .eq("id", customerId)
+        .single();
+
+      // 2. Get all ledger entries
+      const { data: allEntries } = await supabase
+        .from("ledger_entries")
+        .select("*")
+        .eq("customer_id", customerId)
+        .order("date", { ascending: true })
+        .order("created_at", { ascending: true });
+
+      // 3. Get non-hidden entries only
+      const nonHiddenEntries =
+        allEntries?.filter((entry) => !entry.is_hidden) || [];
+
+      // 4. Calculate balance from non-hidden entries
+      let calculatedBalance = 0;
+      if (nonHiddenEntries.length > 0) {
+        nonHiddenEntries.forEach((entry) => {
+          calculatedBalance =
+            calculatedBalance + (entry.debit || 0) - (entry.credit || 0);
+        });
+      }
+
+      // 5. Get last entry balance
+      const lastEntryBalance =
+        allEntries?.[allEntries.length - 1]?.balance || 0;
+
+      console.log("Results:", {
+        customerName: customer?.company_name,
+        customerCurrentBalance: customer?.current_balance,
+        calculatedFromNonHidden: calculatedBalance,
+        lastLedgerEntryBalance: lastEntryBalance,
+        totalEntries: allEntries?.length || 0,
+        nonHiddenEntries: nonHiddenEntries.length,
+        hiddenEntries: (allEntries?.length || 0) - nonHiddenEntries.length,
+      });
+
+      console.log("=== END DEBUG ===");
+
+      return {
+        customer,
+        calculatedBalance,
+        lastEntryBalance,
+        allEntries,
+        nonHiddenEntries,
+      };
+    } catch (error) {
+      console.error("Error in debugBalanceConsistency:", error);
+      return null;
     }
   },
 };

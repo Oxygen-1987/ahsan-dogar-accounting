@@ -30,7 +30,7 @@ import {
   ClockCircleOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import type { Payment, PaymentAllocation } from "../../types";
+import type { Payment, PaymentDistribution } from "../../types";
 import { paymentService } from "../../services/paymentService";
 import { reportPdfService } from "../../services/reportPdfService";
 import dayjs from "dayjs";
@@ -42,9 +42,9 @@ const { Search } = Input;
 
 interface PaymentDetail {
   payment: Payment;
-  totalAllocated: number;
+  totalDistributed: number; // Changed from totalDistributed
   remainingAmount: number;
-  allocationCount: number;
+  distributionCount: number; // Changed from DistributionCount
 }
 
 const PaymentDetailsReport: React.FC = () => {
@@ -73,16 +73,16 @@ const PaymentDetailsReport: React.FC = () => {
       const { payments } = await paymentService.getAllPayments();
 
       const details = payments.map((payment) => {
-        const totalAllocated =
-          payment.allocations?.reduce((sum, alloc) => sum + alloc.amount, 0) ||
-          0;
-        const remainingAmount = payment.total_received - totalAllocated;
+        const totalDistributed = // Changed variable name
+          payment.distributions?.reduce((sum, dist) => sum + dist.amount, 0) ||
+          0; // Changed from Distributions to distributions
+        const remainingAmount = payment.total_received - totalDistributed;
 
         return {
           payment,
-          totalAllocated,
+          totalDistributed, // Changed
           remainingAmount,
-          allocationCount: payment.allocations?.length || 0,
+          distributionCount: payment.distributions?.length || 0, // Changed
         };
       });
 
@@ -151,13 +151,13 @@ const PaymentDetailsReport: React.FC = () => {
     return filteredData.reduce(
       (acc, item) => ({
         totalReceived: acc.totalReceived + item.payment.total_received,
-        totalAllocated: acc.totalAllocated + item.totalAllocated,
+        totalDistributed: acc.totalDistributed + item.totalDistributed, // Changed
         remainingAmount: acc.remainingAmount + item.remainingAmount,
         paymentCount: acc.paymentCount + 1,
       }),
       {
         totalReceived: 0,
-        totalAllocated: 0,
+        totalDistributed: 0, // Changed from totalDistributed
         remainingAmount: 0,
         paymentCount: 0,
       }
@@ -252,9 +252,9 @@ const PaymentDetailsReport: React.FC = () => {
       "Reference Number",
       "Bank Name",
       "Cheque Date",
-      "Total Allocated (PKR)",
+      "Total Distributed (PKR)", // Changed
       "Remaining Amount (PKR)",
-      "Allocation Count",
+      "Distribution Count", // Changed
       "Notes",
     ];
 
@@ -270,9 +270,9 @@ const PaymentDetailsReport: React.FC = () => {
       item.payment.cheque_date
         ? dayjs(item.payment.cheque_date).format("DD/MM/YYYY")
         : "",
-      item.totalAllocated,
+      item.totalDistributed, // Changed
       item.remainingAmount,
-      item.allocationCount,
+      item.distributionCount, // Changed
       item.payment.notes || "",
     ]);
 
@@ -282,12 +282,12 @@ const PaymentDetailsReport: React.FC = () => {
       ["PAYMENT DETAILS REPORT SUMMARY"],
       ["Total Payments:", totals.paymentCount],
       ["Total Received:", totals.totalReceived],
-      ["Total Allocated:", totals.totalAllocated],
+      ["Total Distributed:", totals.totalDistributed], // Changed
       ["Total Remaining:", totals.remainingAmount],
       [
-        "Percentage Allocated:",
+        "Percentage Distributed:", // Changed
         totals.totalReceived > 0
-          ? `${((totals.totalAllocated / totals.totalReceived) * 100).toFixed(
+          ? `${((totals.totalDistributed / totals.totalReceived) * 100).toFixed(
               2
             )}%`
           : "0%",
@@ -320,14 +320,17 @@ const PaymentDetailsReport: React.FC = () => {
     },
   ];
 
-  // Detailed columns for payment allocations (like side panel)
-  const allocationColumns: ColumnsType<PaymentAllocation> = [
+  // Detailed columns for payment distribution (like side panel)
+  const distributionColumns: ColumnsType<any> = [
     {
       title: "Payee",
       dataIndex: "payee_name",
       key: "payee_name",
       width: 150,
-      render: (text: string, record: PaymentAllocation) => (
+      render: (
+        text: string,
+        record: any // Changed type
+      ) => (
         <div>
           <div style={{ fontWeight: 500 }}>{text}</div>
           <Tag color="blue" style={{ marginTop: 4, fontSize: "11px" }}>
@@ -355,9 +358,9 @@ const PaymentDetailsReport: React.FC = () => {
       align: "right" as const,
     },
     {
-      title: "Allocation Date",
-      dataIndex: "allocation_date",
-      key: "allocation_date",
+      title: "Distribution Date", // Changed
+      dataIndex: "distribution_date", // Keep this if database column hasn't changed
+      key: "distribution_date",
       width: 120,
       render: (date: string) => dayjs(date).format("DD/MM/YYYY"),
       align: "center" as const,
@@ -451,9 +454,10 @@ const PaymentDetailsReport: React.FC = () => {
               marginBottom: 4,
             }}
           >
-            <Text style={{ fontSize: "12px" }}>Allocated:</Text>
+            <Text style={{ fontSize: "12px" }}>Distributed:</Text>{" "}
+            {/* Changed */}
             <Text strong style={{ color: "#1890ff", fontSize: "13px" }}>
-              PKR {record.totalAllocated.toLocaleString()}
+              PKR {record.totalDistributed.toLocaleString()} {/* Changed */}
             </Text>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -473,7 +477,7 @@ const PaymentDetailsReport: React.FC = () => {
               PKR {record.remainingAmount.toLocaleString()}
             </Text>
           </div>
-          {record.allocationCount > 0 && (
+          {record.distributionCount > 0 && ( // Changed
             <div
               style={{
                 fontSize: "11px",
@@ -482,8 +486,8 @@ const PaymentDetailsReport: React.FC = () => {
                 textAlign: "right",
               }}
             >
-              ({record.allocationCount} allocation
-              {record.allocationCount > 1 ? "s" : ""})
+              ({record.distributionCount} distribution {/* Changed */}
+              {record.distributionCount > 1 ? "s" : ""})
             </div>
           )}
         </div>
@@ -566,8 +570,8 @@ const PaymentDetailsReport: React.FC = () => {
               PAYMENT DETAILS REPORT
             </Title>
             <Text type="secondary">
-              Comprehensive payment allocations and details - Similar to Payment
-              Side Panel
+              Comprehensive payment distributions and details - Similar to
+              Payment Side Panel
             </Text>
           </div>
           <Space>
@@ -613,8 +617,8 @@ const PaymentDetailsReport: React.FC = () => {
           <Col xs={24} sm={12} lg={6}>
             <Card>
               <Statistic
-                title="Total Allocated"
-                value={totals.totalAllocated}
+                title="Total Distributed"
+                value={totals.totalDistributed}
                 prefix="PKR "
                 valueStyle={{ color: "#1890ff" }}
               />
@@ -726,13 +730,13 @@ const PaymentDetailsReport: React.FC = () => {
                 >
                   <div style={{ marginBottom: 16 }}>
                     <Text strong style={{ fontSize: "14px" }}>
-                      Payment Allocations
+                      Payment Distributions {/* Changed */}
                     </Text>
-                    {record.payment.allocations &&
-                    record.payment.allocations.length > 0 ? (
+                    {record.payment.distributions && // Changed
+                    record.payment.distributions.length > 0 ? ( // Changed
                       <Table
-                        columns={allocationColumns}
-                        dataSource={record.payment.allocations}
+                        columns={distributionColumns} // Changed
+                        dataSource={record.payment.distributions} // Changed
                         pagination={false}
                         size="small"
                         rowKey="id"
@@ -747,7 +751,7 @@ const PaymentDetailsReport: React.FC = () => {
                           marginTop: 12,
                         }}
                       >
-                        No allocations found for this payment
+                        No distributions found for this payment {/* Changed */}
                       </div>
                     )}
                   </div>
@@ -811,36 +815,42 @@ const PaymentDetailsReport: React.FC = () => {
                           </div>
                         </div>
                       )}
-                      {record.payment.allocations?.map((alloc, index) => (
-                        <div
-                          key={alloc.id}
-                          style={{
-                            display: "flex",
-                            alignItems: "flex-start",
-                            marginBottom: 12,
-                          }}
-                        >
-                          <DollarOutlined
+                      {record.payment.distributions?.map(
+                        (
+                          dist,
+                          index // Changed
+                        ) => (
+                          <div
+                            key={dist.id}
                             style={{
-                              color: "#52c41a",
-                              marginRight: 8,
-                              marginTop: 2,
+                              display: "flex",
+                              alignItems: "flex-start",
+                              marginBottom: 12,
                             }}
-                          />
-                          <div>
-                            <div>Allocated to {alloc.payee_name}</div>
-                            <div style={{ fontSize: "12px", color: "#666" }}>
-                              {dayjs(alloc.allocation_date).format(
-                                "DD/MM/YYYY"
-                              )}{" "}
-                              - PKR {alloc.amount.toLocaleString()}
-                            </div>
-                            <div style={{ fontSize: "12px", color: "#666" }}>
-                              Purpose: {alloc.purpose}
+                          >
+                            <DollarOutlined
+                              style={{
+                                color: "#52c41a",
+                                marginRight: 8,
+                                marginTop: 2,
+                              }}
+                            />
+                            <div>
+                              <div>Distributed to {dist.payee_name}</div>{" "}
+                              {/* Changed */}
+                              <div style={{ fontSize: "12px", color: "#666" }}>
+                                {dayjs(dist.distribution_date).format(
+                                  "DD/MM/YYYY"
+                                )}{" "}
+                                - PKR {dist.amount.toLocaleString()}
+                              </div>
+                              <div style={{ fontSize: "12px", color: "#666" }}>
+                                Purpose: {dist.purpose}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        )
+                      )}
                     </div>
                   </div>
                 </div>
@@ -882,13 +892,15 @@ const PaymentDetailsReport: React.FC = () => {
                         }}
                       >
                         <Text style={{ fontSize: "12px" }}>
-                          Total Allocated:
-                        </Text>
+                          Total Distributed:
+                        </Text>{" "}
+                        {/* Changed */}
                         <Text
                           strong
                           style={{ color: "#1890ff", fontSize: "13px" }}
                         >
-                          PKR {totals.totalAllocated.toLocaleString()}
+                          PKR {totals.totalDistributed.toLocaleString()}{" "}
+                          {/* Changed */}
                         </Text>
                       </div>
                       <div
@@ -921,9 +933,10 @@ const PaymentDetailsReport: React.FC = () => {
                     <Text type="secondary">
                       {totals.totalReceived > 0
                         ? `${(
-                            (totals.totalAllocated / totals.totalReceived) *
+                            (totals.totalDistributed / totals.totalReceived) *
                             100
-                          ).toFixed(1)}% allocated`
+                          ) // Changed
+                            .toFixed(1)}% distributed` // Changed
                         : "No payments"}
                     </Text>
                   </Table.Summary.Cell>
