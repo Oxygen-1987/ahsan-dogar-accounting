@@ -21,17 +21,13 @@ import {
   FileImageOutlined,
   EditOutlined,
   DeleteOutlined,
-  CreditCardOutlined,
-  CopyOutlined,
   PrinterOutlined,
   DownOutlined,
-  SendOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import type { Invoice } from "../types";
 import { invoiceService } from "../services/invoiceService";
 import InvoiceViewPanel from "../components/invoices/InvoiceViewPanel";
-import ReceivePaymentModal from "../components/payments/ReceivePaymentModal";
 import LoadingSpinner from "../components/common/LoadingSpinner";
 import { professionalInvoiceService } from "../services/professionalInvoiceService";
 import "./Invoices.css";
@@ -46,16 +42,10 @@ const Invoices: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [viewPanelVisible, setViewPanelVisible] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
-  const [receivePaymentModalVisible, setReceivePaymentModalVisible] =
-    useState(false);
-  const [paymentSelectedCustomer, setPaymentSelectedCustomer] =
-    useState<any>(null);
   const [searchText, setSearchText] = useState("");
   const [summary, setSummary] = useState({
     totalInvoices: 0,
     totalAmount: 0,
-    pendingAmount: 0,
-    paidAmount: 0,
   });
 
   // Load invoices data
@@ -84,66 +74,29 @@ const Invoices: React.FC = () => {
     setViewPanelVisible(true);
   };
 
-  // Handle receive payment
-  const handleReceivePayment = (invoice: Invoice) => {
-    if (!invoice.customer) {
-      message.error("Customer information not found for this invoice");
-      return;
-    }
-
-    // Create customer object for payment modal
-    const customerForPayment = {
-      id: invoice.customer_id,
-      company_name: invoice.customer.company_name,
-      first_name: invoice.customer.first_name,
-      last_name: invoice.customer.last_name,
-      current_balance: invoice.customer.current_balance || 0,
-      opening_balance: invoice.customer.opening_balance || 0,
-    };
-
-    // Set the customer for payment modal
-    setPaymentSelectedCustomer(customerForPayment);
-
-    // Open the payment modal
-    setReceivePaymentModalVisible(true);
-  };
-
-  // Add this function for payment success
-  const handlePaymentReceived = () => {
-    message.success("Payment recorded successfully");
-    setReceivePaymentModalVisible(false);
-    setPaymentSelectedCustomer(null);
-    loadInvoices(); // Refresh invoices list
-  };
-
-  // Handle mark as sent - ONLY for draft invoices
-  const handleMarkAsSent = async (invoice: Invoice) => {
-    // Check if invoice can be marked as sent
-    if (invoice.status !== "draft") {
-      message.warning(
-        `Cannot mark as sent. Invoice is already ${invoice.status}.`
-      );
-      return;
-    }
-
-    try {
-      await invoiceService.markAsSent(invoice.id);
-      message.success(`Invoice ${invoice.invoice_number} marked as sent`);
-      loadInvoices();
-    } catch (error) {
-      message.error("Failed to mark invoice as sent");
-      console.error("Error marking invoice as sent:", error);
-    }
-  };
-
   // Handle edit invoice - navigate to create page with invoice data
   const handleEditInvoice = (invoice: Invoice) => {
     navigate(`/invoices/edit/${invoice.id}`);
   };
 
   // Handle print invoice
-  const handlePrintInvoice = (invoice: Invoice) => {
-    message.info(`Print invoice ${invoice.invoice_number}`);
+  const handlePrintInvoice = async (invoice: Invoice) => {
+    try {
+      const fullInvoice = await invoiceService.getInvoiceById(invoice.id);
+      if (fullInvoice) {
+        await professionalInvoiceService.downloadInvoice(
+          fullInvoice,
+          "pdf",
+          true
+        );
+        message.success("PDF downloaded with letterhead");
+      } else {
+        message.error("Could not load invoice data");
+      }
+    } catch (error) {
+      console.error("Error printing invoice:", error);
+      message.error("Failed to print invoice");
+    }
   };
 
   // Handle delete invoice
@@ -170,103 +123,116 @@ const Invoices: React.FC = () => {
     });
   };
 
-  // Check if invoice can be marked as sent
-  const canMarkAsSent = (invoice: Invoice): boolean => {
-    // Only draft invoices can be marked as sent
-    return invoice.status === "draft";
+  // Get status color for due date
+  const getDueDateStatus = (dueDate: string) => {
+    const today = new Date();
+    const due = new Date(dueDate);
+    const diffDays = Math.ceil(
+      (due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    if (diffDays < 0) return "red"; // Overdue
+    if (diffDays <= 7) return "orange"; // Due soon
+    return "green"; // On track
   };
 
-  // Check if invoice can receive payment
-  const canReceivePayment = (invoice: Invoice): boolean => {
-    // Invoices that are sent, partial, or overdue can receive payment
-    return ["sent", "partial", "overdue"].includes(invoice.status);
-  };
-
-  // Get status color
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "paid":
-        return "green";
-      case "overdue":
-        return "red";
-      case "partial":
-        return "orange";
-      case "sent":
-        return "blue";
-      case "draft":
-        return "default";
-      default:
-        return "default";
-    }
-  };
-
-  // Get status text
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case "paid":
-        return "Paid";
-      case "overdue":
-        return "Overdue";
-      case "partial":
-        return "Partial";
-      case "sent":
-        return "Sent";
-      case "draft":
-        return "Draft";
-      default:
-        return status;
-    }
-  };
-
-  // Action dropdown menu - UPDATED
+  // Action dropdown menu
   const getActionMenu = (invoice: Invoice): MenuProps => ({
     onClick: (e) => {
       e.domEvent.stopPropagation();
     },
     items: [
       {
-        key: "view-edit",
-        label: "View/Edit",
+        key: "view",
+        label: "View Details",
         icon: <EyeOutlined />,
+        onClick: (e) => {
+          e.domEvent.stopPropagation();
+          handleViewInvoice(invoice);
+        },
+      },
+      {
+        key: "edit",
+        label: "Edit Invoice",
+        icon: <EditOutlined />,
         onClick: (e) => {
           e.domEvent.stopPropagation();
           handleEditInvoice(invoice);
         },
       },
       {
-        key: "mark-as-sent",
-        label: "Mark as Sent",
-        icon: <SendOutlined />,
-        disabled: !canMarkAsSent(invoice), // Disable if not draft
-        onClick: (e) => {
-          e.domEvent.stopPropagation();
-          if (canMarkAsSent(invoice)) {
-            handleMarkAsSent(invoice);
-          }
-        },
-      },
-      {
-        key: "receive-payment",
-        label: "Receive Payment",
-        icon: <CreditCardOutlined />,
-        disabled: !canReceivePayment(invoice), // Disable if not payable
-        onClick: (e) => {
-          e.domEvent.stopPropagation();
-          if (canReceivePayment(invoice)) {
-            handleReceivePayment(invoice);
-          }
-        },
-      },
-      {
         type: "divider",
       },
       {
-        key: "print",
-        label: "Print",
-        icon: <PrinterOutlined />,
-        onClick: (e) => {
-          e.domEvent.stopPropagation();
-          handlePrintInvoice(invoice);
+        key: "print_pdf_letterhead",
+        label: "PDF with Letterhead",
+        icon: <FilePdfOutlined />,
+        onClick: async (e) => {
+          if (e && e.domEvent) e.domEvent.stopPropagation();
+          try {
+            const fullInvoice = await invoiceService.getInvoiceById(invoice.id);
+            if (fullInvoice) {
+              await professionalInvoiceService.downloadInvoice(
+                fullInvoice,
+                "pdf",
+                true
+              );
+              message.success("PDF downloaded with letterhead");
+            } else {
+              message.error("Could not load invoice data");
+            }
+          } catch (error) {
+            console.error("Error downloading invoice:", error);
+            message.error("Failed to download invoice");
+          }
+        },
+      },
+      {
+        key: "print_pdf_simple",
+        label: "PDF without Letterhead",
+        icon: <FilePdfOutlined />,
+        onClick: async (e) => {
+          if (e && e.domEvent) e.domEvent.stopPropagation();
+          try {
+            const fullInvoice = await invoiceService.getInvoiceById(invoice.id);
+            if (fullInvoice) {
+              await professionalInvoiceService.downloadInvoice(
+                fullInvoice,
+                "pdf",
+                false
+              );
+              message.success("PDF downloaded without letterhead");
+            } else {
+              message.error("Could not load invoice data");
+            }
+          } catch (error) {
+            console.error("Error downloading invoice:", error);
+            message.error("Failed to download invoice");
+          }
+        },
+      },
+      {
+        key: "export_jpg",
+        label: "JPG Image",
+        icon: <FileImageOutlined />,
+        onClick: async (e) => {
+          if (e && e.domEvent) e.domEvent.stopPropagation();
+          try {
+            const fullInvoice = await invoiceService.getInvoiceById(invoice.id);
+            if (fullInvoice) {
+              await professionalInvoiceService.downloadInvoice(
+                fullInvoice,
+                "jpg",
+                true
+              );
+              message.success("JPG image downloaded");
+            } else {
+              message.error("Could not load invoice data");
+            }
+          } catch (error) {
+            console.error("Error exporting invoice:", error);
+            message.error("Failed to export invoice");
+          }
         },
       },
       {
@@ -299,50 +265,93 @@ const Invoices: React.FC = () => {
       title: "Date",
       dataIndex: "issue_date",
       key: "issue_date",
-      width: 120,
-      render: (date: string) => new Date(date).toLocaleDateString("en-GB"),
+      width: 100,
+      align: "center",
+      render: (date: string) => {
+        if (!date) return "N/A";
+        try {
+          return new Date(date).toLocaleDateString("en-GB");
+        } catch (error) {
+          return "Invalid Date";
+        }
+      },
+      sorter: (a, b) => {
+        const dateA = a.issue_date ? new Date(a.issue_date).getTime() : 0;
+        const dateB = b.issue_date ? new Date(b.issue_date).getTime() : 0;
+        return dateA - dateB;
+      },
     },
     {
-      title: "No.",
+      title: "Invoice No.",
       dataIndex: "invoice_number",
       key: "invoice_number",
       width: 140,
+      align: "center",
     },
     {
       title: "Customer",
       dataIndex: "customer",
       key: "customer",
+      width: 200,
+      ellipsis: true,
       render: (customer) => customer?.company_name || "N/A",
     },
     {
-      title: "Amount",
+      title: "Total Amount",
       dataIndex: "total_amount",
       key: "total_amount",
-      width: 120,
-      render: (amount: number) => `PKR ${amount.toLocaleString()}`,
+      width: 140,
+      align: "right",
+      render: (amount: number) => {
+        const safeAmount = amount || 0;
+        return (
+          <span style={{ fontWeight: "bold", color: "#1890ff" }}>
+            PKR {safeAmount.toLocaleString()}
+          </span>
+        );
+      },
+      sorter: (a, b) => (a.total_amount || 0) - (b.total_amount || 0),
     },
     {
-      title: "Status",
-      dataIndex: "status",
-      key: "status",
-      width: 100,
-      render: (status: string) => (
-        <Tag color={getStatusColor(status)}>{getStatusText(status)}</Tag>
-      ),
+      title: "Customer Balance",
+      dataIndex: ["customer", "current_balance"],
+      key: "customer_balance",
+      width: 160,
+      align: "right",
+      render: (balance: number, record: Invoice) => {
+        const safeBalance = balance || 0;
+
+        // Determine color based on balance
+        let color = "#666"; // Default for zero
+        if (safeBalance > 0) {
+          color = "#cf1322"; // Red for positive balance (customer owes money)
+        } else if (safeBalance < 0) {
+          color = "#389e0d"; // Green for negative balance (customer has credit)
+        }
+
+        // Format the display
+        const displayAmount = Math.abs(safeBalance);
+        const displayText =
+          safeBalance < 0
+            ? `PKR ${displayAmount.toLocaleString()} CR`
+            : `PKR ${displayAmount.toLocaleString()}`;
+
+        return <span style={{ fontWeight: "bold", color }}>{displayText}</span>;
+      },
+      sorter: (a, b) =>
+        (a.customer?.current_balance || 0) - (b.customer?.current_balance || 0),
     },
     {
       title: "Action",
       key: "action",
-      width: 250,
+      width: 180,
+      align: "center",
       render: (_, record: Invoice) => (
         <Space size="small">
           <Button
             size="small"
             icon={<EyeOutlined />}
-            onClick={() => {
-              console.log("Viewing invoice:", record.id);
-              handleViewInvoice(record);
-            }}
+            onClick={() => handleViewInvoice(record)}
             title="View Details"
           />
           <Button
@@ -350,119 +359,12 @@ const Invoices: React.FC = () => {
             icon={<EditOutlined />}
             onClick={(e) => {
               e.stopPropagation();
-              e.preventDefault();
-              console.log("Editing invoice:", record.id);
-              navigate(`/invoices/edit/${record.id}`); // Fixed route
+              handleEditInvoice(record);
             }}
             title="Edit Invoice"
           />
           <Dropdown
-            menu={{
-              items: [
-                {
-                  key: "print_pdf_letterhead",
-                  label: "PDF with Letterhead",
-                  icon: <FilePdfOutlined />,
-                  onClick: async (e) => {
-                    if (e && e.domEvent) e.domEvent.stopPropagation();
-                    try {
-                      const fullInvoice = await invoiceService.getInvoiceById(
-                        record.id
-                      );
-                      if (fullInvoice) {
-                        await professionalInvoiceService.downloadInvoice(
-                          fullInvoice,
-                          "pdf",
-                          true
-                        );
-                        message.success("PDF downloaded with letterhead");
-                      } else {
-                        message.error("Could not load invoice data");
-                      }
-                    } catch (error) {
-                      console.error("Error downloading invoice:", error);
-                      message.error("Failed to download invoice");
-                    }
-                  },
-                },
-                {
-                  key: "print_pdf_simple",
-                  label: "PDF without Letterhead",
-                  icon: <FilePdfOutlined />,
-                  onClick: async (e) => {
-                    if (e && e.domEvent) e.domEvent.stopPropagation();
-                    try {
-                      const fullInvoice = await invoiceService.getInvoiceById(
-                        record.id
-                      );
-                      if (fullInvoice) {
-                        await professionalInvoiceService.downloadInvoice(
-                          fullInvoice,
-                          "pdf",
-                          false
-                        );
-                        message.success("PDF downloaded without letterhead");
-                      } else {
-                        message.error("Could not load invoice data");
-                      }
-                    } catch (error) {
-                      console.error("Error downloading invoice:", error);
-                      message.error("Failed to download invoice");
-                    }
-                  },
-                },
-                {
-                  key: "export_jpg",
-                  label: "JPG Image",
-                  icon: <FileImageOutlined />,
-                  onClick: async (e) => {
-                    if (e && e.domEvent) e.domEvent.stopPropagation();
-                    try {
-                      const fullInvoice = await invoiceService.getInvoiceById(
-                        record.id
-                      );
-                      if (fullInvoice) {
-                        await professionalInvoiceService.downloadInvoice(
-                          fullInvoice,
-                          "jpg",
-                          true
-                        );
-                        message.success("JPG image downloaded");
-                      } else {
-                        message.error("Could not load invoice data");
-                      }
-                    } catch (error) {
-                      console.error("Error exporting invoice:", error);
-                      message.error("Failed to export invoice");
-                    }
-                  },
-                },
-                {
-                  key: "preview",
-                  label: "Preview in Browser",
-                  icon: <EyeOutlined />,
-                  onClick: async (e) => {
-                    if (e && e.domEvent) e.domEvent.stopPropagation();
-                    try {
-                      const fullInvoice = await invoiceService.getInvoiceById(
-                        record.id
-                      );
-                      if (fullInvoice) {
-                        await professionalInvoiceService.previewInvoice(
-                          fullInvoice,
-                          true
-                        );
-                      } else {
-                        message.error("Could not load invoice data");
-                      }
-                    } catch (error) {
-                      console.error("Error previewing invoice:", error);
-                      message.error("Failed to preview invoice");
-                    }
-                  },
-                },
-              ],
-            }}
+            menu={getActionMenu(record)}
             trigger={["click"]}
             onClick={(e) => e.stopPropagation()}
           >
@@ -472,19 +374,9 @@ const Invoices: React.FC = () => {
               title="Print/Export Options"
               onClick={(e) => e.stopPropagation()}
             >
-              Print <DownOutlined />
+              <DownOutlined />
             </Button>
           </Dropdown>
-          <Button
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDeleteInvoice(record);
-            }}
-            title="Delete Invoice"
-          />
         </Space>
       ),
     },
@@ -514,7 +406,7 @@ const Invoices: React.FC = () => {
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ margin: 0, fontSize: "24px", fontWeight: "bold" }}>
-          Bill/Invoice
+          Bills/Invoices
         </h1>
       </div>
 
@@ -542,20 +434,34 @@ const Invoices: React.FC = () => {
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
-              title="Pending Amount"
-              value={summary.pendingAmount}
+              title="Average Invoice"
+              value={
+                summary.totalInvoices > 0
+                  ? summary.totalAmount / summary.totalInvoices
+                  : 0
+              }
               prefix="PKR "
-              valueStyle={{ color: "#ff4d4f" }}
+              valueStyle={{ color: "#722ed1" }}
+              precision={2} // ADD THIS LINE
+              formatter={(value) => value.toLocaleString("en-PK")} // ADD THIS LINE
             />
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
-              title="Paid Amount"
-              value={summary.paidAmount}
-              prefix="PKR "
-              valueStyle={{ color: "#52c41a" }}
+              title="This Month"
+              value={
+                invoices.filter((inv) => {
+                  const invoiceDate = new Date(inv.issue_date);
+                  const now = new Date();
+                  return (
+                    invoiceDate.getMonth() === now.getMonth() &&
+                    invoiceDate.getFullYear() === now.getFullYear()
+                  );
+                }).length
+              }
+              valueStyle={{ color: "#faad14" }}
             />
           </Card>
         </Col>
@@ -581,6 +487,7 @@ const Invoices: React.FC = () => {
             style={{ width: 400 }}
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
+            onSearch={() => {}}
           />
           <Button
             type="primary"
@@ -608,6 +515,9 @@ const Invoices: React.FC = () => {
             showTotal: (total, range) =>
               `${range[0]}-${range[1]} of ${total} invoices`,
           }}
+          locale={{
+            emptyText: "No invoices found",
+          }}
         />
       </Card>
 
@@ -617,22 +527,9 @@ const Invoices: React.FC = () => {
         onClose={() => setViewPanelVisible(false)}
         invoice={selectedInvoice}
         onEdit={handleEditInvoice}
-        onReceivePayment={handleReceivePayment}
         onPrint={handlePrintInvoice}
         onDelete={handleDeleteInvoice}
-        onMarkAsSent={handleMarkAsSent}
         onReload={loadInvoices}
-      />
-
-      {/* Receive Payment Modal */}
-      <ReceivePaymentModal
-        visible={receivePaymentModalVisible}
-        onCancel={() => {
-          setReceivePaymentModalVisible(false);
-          setPaymentSelectedCustomer(null);
-        }}
-        onSuccess={handlePaymentReceived}
-        customer={paymentSelectedCustomer}
       />
     </div>
   );

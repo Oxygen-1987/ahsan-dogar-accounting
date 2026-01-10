@@ -53,15 +53,7 @@ const CustomerDetails: React.FC = () => {
   const [discounts, setDiscounts] = useState<DiscountEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingDiscounts, setLoadingDiscounts] = useState(false);
-
-  // Add state for opening balance
-  const [openingBalance, setOpeningBalance] = useState<{
-    amount: number;
-    date: string;
-    isPositive: boolean;
-    paidAmount: number;
-    remainingAmount: number;
-  } | null>(null);
+  const [outstandingBalance, setOutstandingBalance] = useState(0);
 
   // State for side panels and modals
   const [sidePanelVisible, setSidePanelVisible] = useState(false);
@@ -77,15 +69,9 @@ const CustomerDetails: React.FC = () => {
       loadCustomerInvoices();
       loadCustomerPayments();
       loadCustomerDiscounts();
+      loadCustomerOutstandingBalance();
     }
   }, [id]);
-
-  // Add this useEffect to load opening balance when customer is loaded
-  useEffect(() => {
-    if (customer && id) {
-      loadCustomerOpeningBalance();
-    }
-  }, [customer, id]);
 
   const loadCustomerDetails = async () => {
     try {
@@ -104,33 +90,25 @@ const CustomerDetails: React.FC = () => {
 
   const loadCustomerInvoices = async () => {
     try {
-      // Get all invoices and filter for this customer
-      const result = await invoiceService.getAllInvoices();
-      const allInvoices = result.invoices || [];
-      const customerInvoices = allInvoices.filter(
-        (invoice) => invoice.customer_id === id
-      );
+      const customerInvoices = await invoiceService.getCustomerInvoices(id!);
       setInvoices(customerInvoices);
       console.log(`Loaded ${customerInvoices.length} invoices for customer`);
     } catch (error) {
       console.error("Error loading invoices:", error);
-      setInvoices([]); // Set empty array on error
+      setInvoices([]);
     }
   };
 
   const loadCustomerPayments = async () => {
     try {
-      // Get all payments and filter for this customer
-      const result = await paymentService.getAllPayments();
-      const allPayments = result.payments || [];
-      const customerPayments = allPayments.filter(
-        (payment) => payment.customer_id === id
+      const customerPayments = await paymentService.getPaymentsByCustomerId(
+        id!
       );
       setPayments(customerPayments);
       console.log(`Loaded ${customerPayments.length} payments for customer`);
     } catch (error) {
       console.error("Error loading payments:", error);
-      setPayments([]); // Set empty array on error
+      setPayments([]);
     }
   };
 
@@ -150,21 +128,21 @@ const CustomerDetails: React.FC = () => {
     }
   };
 
-  const loadCustomerOpeningBalance = async () => {
+  const loadCustomerOutstandingBalance = async () => {
     if (!id) return;
 
     try {
-      const openingData = await customerService.getCustomerOpeningBalance(id);
-      console.log("Opening balance data loaded:", openingData);
-      setOpeningBalance(openingData);
+      // This returns the correct balance including opening balance
+      const balance = await customerService.getCustomerOutstandingBalance(id);
+      setOutstandingBalance(balance);
+      console.log(`Outstanding balance (including opening): ${balance}`);
     } catch (error) {
-      console.error("Failed to load opening balance:", error);
-      setOpeningBalance(null);
+      console.error("Failed to load outstanding balance:", error);
+      setOutstandingBalance(0);
     }
   };
 
   const handleEditCustomerDirect = () => {
-    // Open side panel directly
     setSidePanelVisible(true);
   };
 
@@ -191,7 +169,8 @@ const CustomerDetails: React.FC = () => {
         await customerService.updateCustomer(customer.id, data);
         message.success("Customer updated successfully");
         setSidePanelVisible(false);
-        await loadCustomerDetails(); // Refresh customer data
+        await loadCustomerDetails();
+        await loadCustomerOutstandingBalance();
       }
     } catch (error) {
       message.error("Failed to update customer");
@@ -205,7 +184,6 @@ const CustomerDetails: React.FC = () => {
     if (!customer) return;
 
     try {
-      // First check if customer can be deleted (same logic as Customers.tsx)
       const canDeleteResult = await customerService.canDeleteCustomer(
         customer.id
       );
@@ -251,7 +229,6 @@ const CustomerDetails: React.FC = () => {
         return;
       }
 
-      // If customer can be deleted, show confirmation
       Modal.confirm({
         title: "Delete Customer",
         content: (
@@ -284,7 +261,6 @@ const CustomerDetails: React.FC = () => {
           } catch (error: any) {
             console.error("Error deleting customer:", error);
 
-            // Show detailed error message
             Modal.error({
               title: "Delete Failed",
               content: (
@@ -333,34 +309,26 @@ const CustomerDetails: React.FC = () => {
   const handlePaymentReceived = () => {
     message.success("Payment recorded successfully");
     setReceivePaymentModalVisible(false);
-    loadCustomerDetails(); // Refresh balances
-    loadCustomerPayments(); // Refresh payments list
-    loadCustomerDiscounts(); // Refresh discounts list
-    loadCustomerInvoices(); // Refresh invoices
-    if (id) {
-      loadCustomerOpeningBalance(); // Refresh opening balance data
-    }
+    loadCustomerDetails();
+    loadCustomerPayments();
+    loadCustomerDiscounts();
+    loadCustomerInvoices();
+    loadCustomerOutstandingBalance();
   };
 
-  // Handler for viewing a payment
   const handleViewPayment = (payment: Payment) => {
     setSelectedPayment(payment);
     setPaymentSidePanelVisible(true);
   };
 
-  // Handler for payment allocation
   const handlePaymentAllocate = (payment: Payment) => {
     message.info(`Allocate payment ${payment.payment_number}`);
-    // Implement allocation logic here if needed
   };
 
-  // Handler for payment edit
   const handlePaymentEdit = (payment: Payment) => {
     message.info(`Edit payment ${payment.payment_number}`);
-    // Implement edit logic here if needed
   };
 
-  // Handler for payment deletion
   const handlePaymentDelete = async (payment: Payment) => {
     Modal.confirm({
       title: "Delete Payment",
@@ -372,14 +340,12 @@ const CustomerDetails: React.FC = () => {
         try {
           await paymentService.deletePayment(payment.id);
           message.success("Payment deleted successfully");
-          loadCustomerPayments(); // Refresh payments list
-          setPaymentSidePanelVisible(false); // Close side panel
+          loadCustomerPayments();
+          setPaymentSidePanelVisible(false);
           setSelectedPayment(null);
-          loadCustomerDiscounts(); // Refresh discounts
-          loadCustomerInvoices(); // Refresh invoices
-          if (id) {
-            loadCustomerOpeningBalance(); // Refresh opening balance
-          }
+          loadCustomerDiscounts();
+          loadCustomerInvoices();
+          loadCustomerOutstandingBalance();
         } catch (error) {
           message.error("Failed to delete payment");
         }
@@ -387,12 +353,10 @@ const CustomerDetails: React.FC = () => {
     });
   };
 
-  // Handler for payment reload
   const handlePaymentReload = () => {
-    loadCustomerPayments(); // Refresh payments
+    loadCustomerPayments();
   };
 
-  // Handler for deleting a discount
   const handleDeleteDiscount = async (discount: DiscountEntry) => {
     Modal.confirm({
       title: "Delete Discount",
@@ -405,8 +369,9 @@ const CustomerDetails: React.FC = () => {
           await discountService.deleteDiscount(discount.id);
           message.success("Discount deleted successfully");
           loadCustomerDiscounts();
-          loadCustomerDetails(); // Refresh balance
-          loadCustomerInvoices(); // Refresh invoices
+          loadCustomerDetails();
+          loadCustomerInvoices();
+          loadCustomerOutstandingBalance();
         } catch (error) {
           message.error("Failed to delete discount");
         }
@@ -439,51 +404,13 @@ const CustomerDetails: React.FC = () => {
       render: (date: string) => dayjs(date).format("DD/MM/YYYY"),
     },
     {
-      title: "Total Amount",
+      title: "Amount",
       dataIndex: "total_amount",
       key: "total_amount",
       render: (amount: number) => (
         <Text strong>PKR {amount.toLocaleString()}</Text>
       ),
       align: "right",
-    },
-    {
-      title: "Paid",
-      dataIndex: "paid_amount",
-      key: "paid_amount",
-      render: (amount: number) => (
-        <Text type="success">PKR {amount.toLocaleString()}</Text>
-      ),
-      align: "right",
-    },
-    {
-      title: "Pending",
-      dataIndex: "pending_amount",
-      key: "pending_amount",
-      render: (amount: number) => (
-        <Text type="danger">PKR {amount.toLocaleString()}</Text>
-      ),
-      align: "right",
-    },
-    {
-      title: "Status",
-      dataIndex: "status",
-      key: "status",
-      render: (status: string) => {
-        const statusConfig: Record<string, { color: string; text: string }> = {
-          draft: { color: "default", text: "Draft" },
-          sent: { color: "blue", text: "Sent" },
-          paid: { color: "green", text: "Paid" },
-          overdue: { color: "red", text: "Overdue" },
-          partial: { color: "orange", text: "Partial" },
-          cancelled: { color: "default", text: "Cancelled" },
-        };
-        const config = statusConfig[status] || {
-          color: "default",
-          text: status,
-        };
-        return <Tag color={config.color}>{config.text}</Tag>;
-      },
     },
     {
       title: "Action",
@@ -549,18 +476,6 @@ const CustomerDetails: React.FC = () => {
         };
         return <Tag color="blue">{methodNames[method] || method}</Tag>;
       },
-    },
-    {
-      title: "Discount",
-      dataIndex: "discount_amount",
-      key: "discount_amount",
-      render: (amount: number) =>
-        amount > 0 ? (
-          <Text type="success">PKR {amount.toLocaleString()}</Text>
-        ) : (
-          <Text type="secondary">-</Text>
-        ),
-      align: "right",
     },
     {
       title: "Status",
@@ -641,7 +556,7 @@ const CustomerDetails: React.FC = () => {
     },
   ];
 
-  // Action menu for customer (REMOVED View Ledger from here)
+  // Action menu for customer
   const getActionMenu = (): MenuProps => ({
     items: [
       {
@@ -670,6 +585,18 @@ const CustomerDetails: React.FC = () => {
   // Calculate total discounts
   const totalDiscounts = discounts.reduce(
     (sum, discount) => sum + (discount.amount || 0),
+    0
+  );
+
+  // Calculate total payments
+  const totalPayments = payments.reduce(
+    (sum, payment) => sum + (payment.total_received || 0),
+    0
+  );
+
+  // Calculate total invoices
+  const totalInvoices = invoices.reduce(
+    (sum, invoice) => sum + (invoice.total_amount || 0),
     0
   );
 
@@ -739,16 +666,11 @@ const CustomerDetails: React.FC = () => {
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
-              title="Current Balance"
-              value={customer.current_balance}
+              title="Outstanding Balance"
+              value={outstandingBalance}
               prefix="PKR "
               valueStyle={{
-                color:
-                  customer.current_balance > 0
-                    ? "#cf1322"
-                    : customer.current_balance < 0
-                    ? "#389e0d"
-                    : "#666",
+                color: outstandingBalance > 0 ? "#cf1322" : "#389e0d",
               }}
             />
           </Card>
@@ -767,7 +689,8 @@ const CustomerDetails: React.FC = () => {
           <Card>
             <Statistic
               title="Total Invoices"
-              value={invoices.length}
+              value={totalInvoices}
+              prefix="PKR "
               valueStyle={{ color: "#722ed1" }}
             />
           </Card>
@@ -775,8 +698,8 @@ const CustomerDetails: React.FC = () => {
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
-              title="Total Discounts"
-              value={totalDiscounts}
+              title="Total Payments"
+              value={totalPayments}
               prefix="PKR "
               valueStyle={{ color: "#52c41a" }}
             />
@@ -803,37 +726,6 @@ const CustomerDetails: React.FC = () => {
               <Descriptions.Item label="Contact Person">
                 {customer.first_name} {customer.last_name}
               </Descriptions.Item>
-
-              {/* Opening Balance Display */}
-              {openingBalance && (
-                <Descriptions.Item label="Opening Balance Details">
-                  <div>
-                    <div>
-                      Amount: PKR {openingBalance.amount.toLocaleString()}
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#666" }}>
-                      {openingBalance.paidAmount > 0 ? (
-                        <span>
-                          (PKR {openingBalance.paidAmount.toLocaleString()}{" "}
-                          paid, PKR{" "}
-                          {openingBalance.remainingAmount.toLocaleString()}{" "}
-                          remaining)
-                        </span>
-                      ) : openingBalance.amount > 0 ? (
-                        <span>Full amount pending</span>
-                      ) : (
-                        <span>No opening balance</span>
-                      )}
-                    </div>
-                    {openingBalance.date && (
-                      <div style={{ fontSize: "12px", color: "#666" }}>
-                        Date: {dayjs(openingBalance.date).format("DD/MM/YYYY")}
-                      </div>
-                    )}
-                  </div>
-                </Descriptions.Item>
-              )}
-
               <Descriptions.Item label="Mobile">
                 {customer.mobile}
               </Descriptions.Item>
@@ -987,12 +879,12 @@ const CustomerDetails: React.FC = () => {
         />
       )}
 
-      {/* Receive Payment Modal - PASS THE CUSTOMER PROP */}
+      {/* Receive Payment Modal */}
       <ReceivePaymentModal
         visible={receivePaymentModalVisible}
         onCancel={() => setReceivePaymentModalVisible(false)}
         onSuccess={handlePaymentReceived}
-        customer={customer} // Pass the customer to auto-select
+        customer={customer}
       />
     </div>
   );

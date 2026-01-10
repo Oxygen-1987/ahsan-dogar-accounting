@@ -514,18 +514,21 @@ const Dashboard: React.FC = () => {
         dataIndex: "status",
         key: "status",
         width: screens.md ? 100 : 80,
-        render: (status: string) => (
-          <Tag
-            color={getStatusColor(status)}
-            style={{
-              fontSize: screens.xs ? "10px" : "12px",
-              padding: screens.xs ? "0 4px" : "2px 8px",
-            }}
-          >
-            {status.charAt(0).toUpperCase()}
-            {screens.sm && status.slice(1)}
-          </Tag>
-        ),
+        render: (status: string) => {
+          if (!status) return <Tag>-</Tag>;
+          return (
+            <Tag
+              color={getStatusColor(status)}
+              style={{
+                fontSize: screens.xs ? "10px" : "12px",
+                padding: screens.xs ? "0 4px" : "2px 8px",
+              }}
+            >
+              {status.charAt(0).toUpperCase()}
+              {screens.sm && status.slice(1)}
+            </Tag>
+          );
+        },
       },
     ].filter(Boolean);
   };

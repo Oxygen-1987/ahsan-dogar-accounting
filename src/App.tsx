@@ -16,6 +16,7 @@ const CustomerDetails = lazy(() => import("./pages/CustomerDetails"));
 const CustomerLedger = lazy(() => import("./pages/CustomerLedger"));
 const Invoices = lazy(() => import("./pages/Invoices"));
 const Payments = lazy(() => import("./pages/Payments"));
+const Discounts = lazy(() => import("./pages/Discounts"));
 const Expenses = lazy(() => import("./pages/Expenses"));
 const Reports = lazy(() => import("./pages/Reports"));
 const Settings = lazy(() => import("./pages/Settings"));
@@ -145,6 +146,10 @@ const App: React.FC = () => {
               element={createProtectedRoute(CreateInvoice)}
             />
             <Route path="/payments" element={createProtectedRoute(Payments)} />
+            <Route
+              path="/discounts"
+              element={createProtectedRoute(Discounts)}
+            />
             <Route path="/expenses" element={createProtectedRoute(Expenses)} />
             <Route path="/reports" element={createProtectedRoute(Reports)} />
             <Route path="/settings" element={createProtectedRoute(Settings)} />

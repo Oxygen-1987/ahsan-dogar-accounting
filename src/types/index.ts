@@ -44,15 +44,6 @@ export interface Customer extends BaseEntity {
   status: "active" | "inactive";
 }
 
-// Invoice Status types
-export type InvoiceStatus =
-  | "draft"
-  | "sent"
-  | "paid"
-  | "overdue"
-  | "partial"
-  | "cancelled";
-
 // Invoice Item
 export interface InvoiceItem {
   id: string;
@@ -62,16 +53,13 @@ export interface InvoiceItem {
   total: number;
 }
 
-// Add Product type
+// Product type
 export interface Product extends BaseEntity {
   name: string;
   description?: string;
   default_rate?: number;
   status: "active" | "inactive";
 }
-
-// Invoice Term types
-export type InvoiceTerm = "due_on_receipt" | "net_15" | "net_30" | "net_60";
 
 // Line Item with inches calculation
 export interface InvoiceLineItem {
@@ -86,27 +74,24 @@ export interface InvoiceLineItem {
 // Invoice Form Data with line items
 export interface InvoiceFormData {
   customer_id: string;
-  invoice_number?: string; // Made optional - will be generated if not provided
+  invoice_number?: string;
   issue_date: string;
-  term: InvoiceTerm;
+  term?: "due_on_receipt" | "net_15" | "net_30" | "net_60";
   due_date: string;
   line_items: InvoiceLineItem[];
   notes?: string;
   payment_terms?: string;
 }
 
-// Invoice
+// Invoice - Simplified (no payment tracking)
 export interface Invoice extends BaseEntity {
   invoice_number: string;
   customer_id: string;
   customer?: Customer;
   issue_date: string;
   due_date: string;
-  total_amount: number;
-  paid_amount: number;
-  pending_amount: number;
-  status: InvoiceStatus;
-  items: InvoiceLineItem[]; // Changed from InvoiceItem[] to InvoiceLineItem[]
+  total_amount: number; // Only bill amount, no payment tracking
+  items: InvoiceLineItem[];
   notes?: string;
   payment_terms?: string;
 }
@@ -121,17 +106,16 @@ export type PaymentMethod =
   | "easypaisa";
 
 // Payment Status types
-export type PaymentStatus = "pending" | "completed" | "cancelled" | "partial";
+export type PaymentStatus = "pending" | "completed" | "cancelled";
 
-// NEW: Payee types for distributions (renamed from allocations)
+// NEW: Payee types for distributions
 export type PayeeType = "supplier" | "expense" | "owner" | "other";
 
-// NEW: Distribution Status types (renamed from allocations)
+// NEW: Distribution Status types
 export type DistributionStatus = "allocated" | "cancelled";
 
 // Payment Form Data
 export interface PaymentFormData {
-  invoice_id?: string;
   customer_id: string;
   payment_date: string;
   total_received: number;
@@ -143,15 +127,14 @@ export interface PaymentFormData {
   cheque_date?: string;
   status: PaymentStatus;
   notes?: string;
-  applications?: CustomerPaymentApplication[]; // NEW: For customer payments to invoices/opening balance
-  distributions?: PaymentDistribution[]; // NEW: For internal allocations (renamed)
+  distributions?: PaymentDistribution[];
 }
 
 // NEW: Customer Payment Application Form Data
 export interface CustomerPaymentApplicationFormData {
   payment_id: string;
   customer_id: string;
-  invoice_id?: string; // NULL for opening balance payments
+  invoice_id?: string;
   amount: number;
   application_date: string;
   notes?: string;
@@ -161,14 +144,14 @@ export interface CustomerPaymentApplicationFormData {
 export interface CustomerPaymentApplication extends BaseEntity {
   payment_id: string;
   customer_id: string;
-  invoice_id?: string; // NULL for opening balance payments
+  invoice_id?: string;
   amount: number;
   application_date: string;
   notes?: string;
-  invoice?: Invoice; // Optional relation
+  invoice?: Invoice;
 }
 
-// NEW: Payment Distribution Form Data (renamed from PaymentAllocation)
+// NEW: Payment Distribution Form Data
 export interface PaymentDistributionFormData {
   payee_name: string;
   payee_type: PayeeType;
@@ -178,7 +161,7 @@ export interface PaymentDistributionFormData {
   notes?: string;
 }
 
-// NEW: Payment Distribution (renamed from PaymentAllocation)
+// NEW: Payment Distribution
 export interface PaymentDistribution extends BaseEntity {
   payment_id: string;
   payee_name: string;
@@ -193,8 +176,6 @@ export interface PaymentDistribution extends BaseEntity {
 // Payment interface
 export interface Payment extends BaseEntity {
   payment_number: string;
-  invoice_id?: string;
-  invoice?: Invoice;
   customer_id: string;
   customer?: Customer;
   payment_date: string;
@@ -207,8 +188,7 @@ export interface Payment extends BaseEntity {
   notes?: string;
   discount_amount?: number;
   net_received?: number;
-  applications?: CustomerPaymentApplication[]; // NEW: for customer payments
-  distributions?: PaymentDistribution[]; // NEW: for internal allocations (renamed)
+  distributions?: PaymentDistribution[];
 }
 
 // Ledger Entry
@@ -230,6 +210,7 @@ export interface LedgerEntry extends BaseEntity {
 export interface DiscountEntry {
   id: string;
   customer_id: string;
+  customer_name?: string; // For UI display
   invoice_id?: string;
   date: string;
   amount: number;
@@ -269,18 +250,6 @@ export interface CompanySettings extends BaseEntity {
   tax_rate?: number;
   invoice_prefix?: string;
   payment_prefix?: string;
-}
-
-// Opening Balance Entry type
-export interface OpeningBalanceEntry {
-  customer_id: string;
-  date: string;
-  type: "opening_balance";
-  reference_number: string;
-  description: string;
-  debit?: number;
-  credit?: number;
-  balance: number;
 }
 
 // For PDF generation

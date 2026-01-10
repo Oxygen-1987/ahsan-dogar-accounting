@@ -160,7 +160,38 @@ export const ledgerService = {
     try {
       console.log("📝 Creating ledger entry:", entry);
 
-      // Get the latest balance (any entry, hidden or not)
+      // SPECIAL CASE: Opening balance entries
+      if (entry.type === "opening_balance") {
+        console.log("Creating opening balance entry");
+
+        // Opening balance sets the initial balance
+        const openingBalance = entry.debit - entry.credit;
+
+        const { data, error } = await supabase
+          .from("ledger_entries")
+          .insert([
+            {
+              ...entry,
+              balance: openingBalance, // Opening balance IS the balance
+            },
+          ])
+          .select()
+          .single();
+
+        if (error) {
+          console.error("❌ Database error:", error);
+          return null;
+        }
+
+        console.log("✅ Opening balance ledger entry added:", data);
+
+        // Update customer balance
+        await this.updateCustomerBalance(entry.customer_id);
+
+        return data;
+      }
+
+      // For regular entries, calculate based on previous balance
       const { data: latestEntry } = await supabase
         .from("ledger_entries")
         .select("balance")
@@ -181,7 +212,7 @@ export const ledgerService = {
       let newBalance = previousBalance;
 
       if (entry.is_hidden) {
-        // CRITICAL: Hidden entries INHERIT the previous balance
+        // Hidden entries INHERIT the previous balance
         newBalance = previousBalance;
         console.log("Hidden entry - INHERITING balance:", newBalance);
       } else {
@@ -201,7 +232,7 @@ export const ledgerService = {
         .insert([
           {
             ...entry,
-            balance: newBalance, // This should be correct now
+            balance: newBalance,
           },
         ])
         .select()

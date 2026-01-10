@@ -243,6 +243,17 @@ const CustomerLedger: React.FC = () => {
       title: "Description",
       dataIndex: "description",
       key: "description",
+      render: (description: string, record: LedgerEntry) => {
+        if (record.type === "discount") {
+          // Clean up discount description
+          let cleanDesc = description;
+          if (cleanDesc.startsWith("Discount: ")) {
+            cleanDesc = cleanDesc.substring(10); // Remove "Discount: " prefix
+          }
+          return cleanDesc;
+        }
+        return description;
+      },
       ellipsis: true,
     },
     {

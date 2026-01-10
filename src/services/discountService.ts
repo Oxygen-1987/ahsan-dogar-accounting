@@ -1,211 +1,139 @@
 import { supabase } from "./supabaseClient";
 import type { DiscountEntry, LedgerEntry } from "../types";
 import { ledgerService } from "./ledgerService";
-import { invoiceService } from "./invoiceService";
 
 export const discountService = {
-  // Apply discount to a specific invoice
-  async applyDiscountToInvoice(
-    customerId: string,
-    invoiceId: string,
-    paymentId: string,
-    discountData: {
-      amount: number;
-      reason?: string;
-      date: string;
-      paymentNumber: string;
-    }
-  ): Promise<DiscountEntry> {
+  // Create discount
+  async createDiscount(discountData: {
+    customer_id: string;
+    amount: number;
+    reason?: string;
+    date: string;
+    invoice_id?: string;
+  }): Promise<DiscountEntry> {
     try {
-      console.log("Applying discount WITH ledger entry:", {
-        customerId,
-        invoiceId,
-        paymentId,
-        discountData,
-      });
+      console.log("Creating discount:", discountData);
 
-      // 1. Get current invoice
-      const { data: invoice, error: invoiceError } = await supabase
-        .from("invoices")
-        .select("*")
-        .eq("id", invoiceId)
-        .single();
+      // Generate reference number
+      const currentYear = new Date().getFullYear();
+      const { data: lastDiscount } = await supabase
+        .from("discounts")
+        .select("reference_number")
+        .order("created_at", { ascending: false })
+        .limit(1);
 
-      if (invoiceError || !invoice) {
-        throw new Error("Invoice not found");
+      let nextSequence = 1;
+      if (lastDiscount && lastDiscount.length > 0) {
+        const lastRef = lastDiscount[0].reference_number;
+        const match = lastRef?.match(/DISC-(\d+)-(\d+)/);
+        if (match && parseInt(match[1]) === currentYear) {
+          nextSequence = parseInt(match[2]) + 1;
+        }
       }
 
-      console.log("Current invoice before discount:", {
-        total: invoice.total_amount,
-        paid: invoice.paid_amount,
-        pending: invoice.pending_amount,
-        status: invoice.status,
-      });
+      const referenceNumber = `DISC-${currentYear}-${nextSequence
+        .toString()
+        .padStart(3, "0")}`;
 
-      // 2. Calculate new values - DISCOUNT REDUCES PENDING
-      // BUT we also need to effectively increase "paid" amount for calculation
-      const newPendingAmount = Math.max(
-        0,
-        invoice.pending_amount - discountData.amount
-      );
-
-      // Keep paid_amount the same (actual cash received)
-      // But for status calculation, consider discount as effective payment
-      const effectivePaid = invoice.paid_amount + discountData.amount;
-
-      // Update status based on effective payment
-      let newStatus = invoice.status;
-      if (newPendingAmount === 0) {
-        newStatus = "paid";
-      } else if (invoice.paid_amount > 0 && newPendingAmount > 0) {
-        newStatus = "partial";
-      }
-
-      // 3. Update the invoice
-      const { error: updateError } = await supabase
-        .from("invoices")
-        .update({
-          pending_amount: newPendingAmount,
-          status: newStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", invoiceId);
-
-      if (updateError) {
-        throw new Error(`Failed to update invoice: ${updateError.message}`);
-      }
-
-      console.log("Invoice updated after discount:", {
-        newPendingAmount,
-        newStatus,
-      });
-
-      // 4. Create discount ledger entry - THIS IS CORRECT
-      const ledgerEntry = await ledgerService.addLedgerEntry({
-        customer_id: customerId,
-        date: discountData.date,
-        type: "discount",
-        reference_id: paymentId,
-        reference_number: discountData.paymentNumber,
-        debit: 0,
-        credit: discountData.amount, // Correct - discount reduces balance
-        description: `Discount on ${invoice.invoice_number}`,
-      });
-
-      if (!ledgerEntry) {
-        throw new Error("Failed to create discount ledger entry");
-      }
-
-      // 5. Create discount record
+      // Create discount record
       const discountEntryData = {
-        id: ledgerEntry.id, // Use same ID as ledger entry
-        customer_id: customerId,
-        invoice_id: invoiceId,
-        payment_id: paymentId,
-        date: discountData.date,
+        customer_id: discountData.customer_id,
+        invoice_id: discountData.invoice_id || null,
         amount: discountData.amount,
         reason: discountData.reason || "Discount",
-        reference_number: discountData.paymentNumber,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        date: discountData.date,
+        reference_number: referenceNumber,
       };
 
-      // Store in discounts table if exists
-      try {
-        await supabase.from("discounts").insert([discountEntryData]);
-      } catch (tableError) {
-        console.log("Note: Discounts table might not exist");
+      const { data: discount, error } = await supabase
+        .from("discounts")
+        .insert([discountEntryData])
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error creating discount:", error);
+        throw error;
       }
 
-      console.log("✅ Discount applied with ledger entry");
+      // Create ledger entry - UPDATE THIS PART
+      let description = `Discount`;
 
-      return discountEntryData;
+      // Use the reason from the form as the description
+      if (discountData.reason) {
+        // Add reference number to make it clear it's a discount
+        description = `Discount: ${discountData.reason}`;
+      }
+
+      // Add invoice reference if applicable
+      if (discountData.invoice_id) {
+        // Try to get invoice number for better description
+        try {
+          const { data: invoice } = await supabase
+            .from("invoices")
+            .select("invoice_number")
+            .eq("id", discountData.invoice_id)
+            .single();
+
+          if (invoice) {
+            description += ` (Invoice: ${invoice.invoice_number})`;
+          }
+        } catch (invoiceError) {
+          // If we can't get invoice number, just mention it's for an invoice
+          description += ` (Invoice)`;
+        }
+      }
+
+      await ledgerService.addLedgerEntry({
+        customer_id: discountData.customer_id,
+        date: discountData.date,
+        type: "discount",
+        reference_id: discount.id,
+        reference_number: referenceNumber,
+        debit: 0,
+        credit: discountData.amount,
+        description: description,
+      });
+
+      // Recalculate customer balance
+      await ledgerService.recalculateCustomerBalance(discountData.customer_id);
+
+      console.log("✅ Discount created successfully");
+      return discount;
     } catch (error) {
-      console.error("❌ Error applying discount:", error);
+      console.error("❌ Error creating discount:", error);
       throw error;
     }
   },
 
-  // Reverse discount applied to an invoice
-  async reverseDiscount(
-    paymentId: string,
-    invoiceId: string,
-    amount: number
-  ): Promise<void> {
+  // Get all discounts
+  async getAllDiscounts(): Promise<DiscountEntry[]> {
     try {
-      console.log("Reversing discount:", { paymentId, invoiceId, amount });
+      const { data: discounts, error } = await supabase
+        .from("discounts")
+        .select(
+          `
+          *,
+          customer:customers(company_name, first_name, last_name)
+        `
+        )
+        .order("date", { ascending: false });
 
-      // 1. Get current invoice discount amount
-      const { data: invoice, error: invoiceError } = await supabase
-        .from("invoices")
-        .select("discount_amount, pending_amount")
-        .eq("id", invoiceId)
-        .single();
-
-      if (invoiceError || !invoice) {
-        console.error("Invoice not found or error:", invoiceError);
-        throw new Error("Invoice not found");
+      if (error) {
+        console.error("Error fetching discounts:", error);
+        return [];
       }
 
-      console.log("Current invoice before discount reversal:", {
-        discountAmount: invoice.discount_amount,
-        pendingAmount: invoice.pending_amount,
-      });
+      // Transform data to include customer name
+      const transformedDiscounts = (discounts || []).map((discount) => ({
+        ...discount,
+        customer_name: discount.customer?.company_name || "Unknown",
+      }));
 
-      // Calculate new amounts
-      const newDiscountAmount = Math.max(
-        0,
-        (invoice.discount_amount || 0) - amount
-      );
-      const newPendingAmount = (invoice.pending_amount || 0) + amount;
-
-      console.log("After discount reversal:", {
-        newDiscountAmount,
-        newPendingAmount,
-      });
-
-      // 2. Update invoice
-      const { error: updateError } = await supabase
-        .from("invoices")
-        .update({
-          discount_amount: newDiscountAmount,
-          pending_amount: newPendingAmount,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", invoiceId);
-
-      if (updateError) {
-        console.error("Error updating invoice:", updateError);
-        throw updateError;
-      }
-
-      // 3. Delete discount ledger entries
-      const { error: ledgerDeleteError } = await supabase
-        .from("ledger_entries")
-        .delete()
-        .eq("reference_id", paymentId)
-        .eq("type", "discount");
-
-      if (ledgerDeleteError) {
-        console.error(
-          "Error deleting discount ledger entries:",
-          ledgerDeleteError
-        );
-        // Don't throw, continue with other cleanup
-      }
-
-      // 4. Delete from discounts table if exists
-      try {
-        await supabase.from("discounts").delete().eq("payment_id", paymentId);
-        console.log("✅ Deleted from discounts table");
-      } catch (tableError) {
-        console.log("⚠️ discounts table not found or empty");
-      }
-
-      console.log(`✅ Discount reversed: PKR ${amount}`);
+      return transformedDiscounts;
     } catch (error) {
-      console.error("Error reversing discount:", error);
-      throw error;
+      console.error("Error in getAllDiscounts:", error);
+      return [];
     }
   },
 
@@ -215,83 +143,21 @@ export const discountService = {
       console.log("=== GET CUSTOMER DISCOUNTS ===");
       console.log("Customer ID:", customerId);
 
-      // First, try to get from ledger_entries (this is the main source)
-      const { data: ledgerEntries, error: ledgerError } = await supabase
-        .from("ledger_entries")
+      // Get from discounts table
+      const { data: discounts, error } = await supabase
+        .from("discounts")
         .select("*")
         .eq("customer_id", customerId)
-        .eq("type", "discount")
         .order("date", { ascending: false });
 
-      if (ledgerError) {
-        console.error("Error fetching discount ledger entries:", ledgerError);
+      if (error) {
+        console.error("Error fetching customer discounts:", error);
         return [];
       }
 
-      console.log("Found discount ledger entries:", ledgerEntries?.length || 0);
+      console.log("Found discounts:", discounts?.length || 0);
 
-      if (!ledgerEntries || ledgerEntries.length === 0) {
-        console.log("No discount ledger entries found");
-        return [];
-      }
-
-      // Transform ledger entries to DiscountEntry format
-      const discountEntries: DiscountEntry[] = [];
-
-      for (const entry of ledgerEntries) {
-        // Extract invoice number from description
-        let invoiceNumber = "Unknown";
-        let reason = entry.description || "Discount";
-
-        const description = entry.description || "";
-        const invoiceMatch = description.match(/invoice\s+([A-Z0-9-]+)/i);
-
-        if (invoiceMatch) {
-          invoiceNumber = invoiceMatch[1];
-          // Clean up reason
-          reason =
-            description.split(":").slice(1).join(":").trim() || "Discount";
-        }
-
-        discountEntries.push({
-          id: entry.id,
-          customer_id: entry.customer_id,
-          invoice_id: null, // We'll try to find this if needed
-          payment_id: entry.reference_id,
-          date: entry.date,
-          amount: entry.credit || 0,
-          reason: reason,
-          created_at: entry.created_at,
-          updated_at: entry.updated_at,
-          reference_number: entry.reference_number,
-        });
-      }
-
-      // Try to also get from discounts table if exists (for completeness)
-      try {
-        const { data: discountsTableData } = await supabase
-          .from("discounts")
-          .select("*")
-          .eq("customer_id", customerId)
-          .order("date", { ascending: false });
-
-        if (discountsTableData && discountsTableData.length > 0) {
-          console.log(
-            "Also found in discounts table:",
-            discountsTableData.length
-          );
-          // Merge with ledger entries if needed
-        }
-      } catch (tableError) {
-        console.log(
-          "Discounts table might not exist, using only ledger entries"
-        );
-      }
-
-      console.log("Returning discount entries:", discountEntries.length);
-      console.log("=== END GET DISCOUNTS ===");
-
-      return discountEntries;
+      return discounts || [];
     } catch (error) {
       console.error("Error in getCustomerDiscounts:", error);
       return [];
@@ -304,184 +170,83 @@ export const discountService = {
       console.log("=== DELETE DISCOUNT START ===");
       console.log("Discount ID:", discountId);
 
-      // First, try to get discount from discounts table
-      let discountAmount = 0;
-      let customerId = "";
-      let invoiceId = "";
-      let paymentId = "";
+      // Get discount details
+      const { data: discount, error: fetchError } = await supabase
+        .from("discounts")
+        .select("*")
+        .eq("id", discountId)
+        .single();
 
-      try {
-        const { data: discountRecord } = await supabase
-          .from("discounts")
-          .select("*")
-          .eq("id", discountId)
-          .single();
-
-        if (discountRecord) {
-          discountAmount = discountRecord.amount;
-          customerId = discountRecord.customer_id;
-          invoiceId = discountRecord.invoice_id;
-          paymentId = discountRecord.payment_id;
-          console.log("Found in discounts table:", discountRecord);
-        }
-      } catch (tableError) {
-        console.log(
-          "Discount not found in discounts table or table doesn't exist"
-        );
-      }
-
-      // If not found in discounts table, check ledger entries
-      if (!customerId) {
-        const { data: ledgerEntry } = await supabase
-          .from("ledger_entries")
-          .select("*")
-          .eq("id", discountId)
-          .eq("type", "discount")
-          .single();
-
-        if (ledgerEntry) {
-          discountAmount = ledgerEntry.credit || 0;
-          customerId = ledgerEntry.customer_id;
-          paymentId = ledgerEntry.reference_id;
-
-          // Extract invoice ID from description
-          const description = ledgerEntry.description || "";
-          const invoiceMatch = description.match(/invoice\s+([A-Z0-9-]+)/i);
-
-          if (invoiceMatch) {
-            const invoiceNumber = invoiceMatch[1];
-            const { data: invoice } = await supabase
-              .from("invoices")
-              .select("id")
-              .eq("invoice_number", invoiceNumber)
-              .eq("customer_id", customerId)
-              .single();
-
-            if (invoice) {
-              invoiceId = invoice.id;
-            }
-          }
-          console.log("Found in ledger entries:", ledgerEntry);
-        }
-      }
-
-      if (!customerId) {
+      if (fetchError || !discount) {
         throw new Error("Discount not found");
       }
 
-      console.log("Discount details:", {
-        discountAmount,
-        customerId,
-        invoiceId,
-        paymentId,
-      });
+      console.log("Discount details:", discount);
 
-      // 1. Reverse the discount on the invoice if invoice exists
-      if (invoiceId && discountAmount > 0) {
-        console.log("Reversing discount on invoice:", invoiceId);
+      // 1. Delete discount record
+      const { error: deleteError } = await supabase
+        .from("discounts")
+        .delete()
+        .eq("id", discountId);
 
-        const { data: invoice } = await supabase
-          .from("invoices")
-          .select("*")
-          .eq("id", invoiceId)
-          .single();
-
-        if (invoice) {
-          const newPaidAmount = Math.max(
-            0,
-            invoice.paid_amount - discountAmount
-          );
-          const newPendingAmount = invoice.total_amount - newPaidAmount;
-
-          console.log("Invoice reversal calculations:", {
-            currentPaid: invoice.paid_amount,
-            currentPending: invoice.pending_amount,
-            discountAmount,
-            newPaidAmount,
-            newPendingAmount,
-          });
-
-          // Update status
-          let newStatus = invoice.status;
-          if (newPendingAmount === invoice.total_amount) {
-            newStatus = "sent";
-          } else if (newPendingAmount > 0 && newPaidAmount > 0) {
-            newStatus = "partial";
-          } else if (newPendingAmount === 0) {
-            newStatus = "paid";
-          }
-
-          // Update the invoice
-          const { error: updateError } = await supabase
-            .from("invoices")
-            .update({
-              paid_amount: newPaidAmount,
-              pending_amount: newPendingAmount,
-              status: newStatus,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", invoiceId);
-
-          if (updateError) {
-            console.error("Error updating invoice:", updateError);
-            throw updateError;
-          }
-
-          console.log("✅ Invoice updated successfully:", {
-            newPaidAmount,
-            newPendingAmount,
-            newStatus,
-          });
-        }
+      if (deleteError) {
+        console.error("Error deleting discount:", deleteError);
+        throw deleteError;
       }
 
-      // 2. Delete from discounts table if exists
-      try {
-        const { error: deleteError } = await supabase
-          .from("discounts")
-          .delete()
-          .eq("id", discountId);
-
-        if (deleteError && deleteError.code !== "42P01") {
-          console.error("Error deleting from discounts table:", deleteError);
-        } else {
-          console.log("✅ Deleted from discounts table");
-        }
-      } catch (tableError) {
-        console.log("Discounts table might not exist");
-      }
-
-      // 3. Delete ledger entry
+      // 2. Delete ledger entry
       try {
         const { error: ledgerDeleteError } = await supabase
           .from("ledger_entries")
           .delete()
-          .eq("id", discountId);
+          .eq("reference_id", discountId)
+          .eq("type", "discount");
 
         if (ledgerDeleteError) {
           console.error("Error deleting ledger entry:", ledgerDeleteError);
-          throw ledgerDeleteError;
         }
-        console.log("✅ Ledger entry deleted");
       } catch (ledgerError) {
         console.error("Error deleting ledger entry:", ledgerError);
-        throw ledgerError;
       }
 
-      // 4. Recalculate customer balance
-      if (customerId) {
-        console.log("Recalculating customer balance:", customerId);
-        try {
-          await ledgerService.recalculateCustomerBalance(customerId);
-          console.log("✅ Customer balance recalculated");
-        } catch (balanceError) {
-          console.error("Error recalculating customer balance:", balanceError);
-        }
+      // 3. Recalculate customer balance
+      if (discount.customer_id) {
+        await ledgerService.recalculateCustomerBalance(discount.customer_id);
+        console.log("✅ Customer balance recalculated");
       }
 
       console.log("=== DELETE DISCOUNT COMPLETE ===");
     } catch (error) {
       console.error("❌ Error in deleteDiscount:", error);
+      throw error;
+    }
+  },
+
+  // Reverse discount
+  async reverseDiscount(
+    paymentId: string,
+    invoiceId: string,
+    amount: number
+  ): Promise<void> {
+    try {
+      console.log("Reversing discount:", { paymentId, invoiceId, amount });
+
+      // Find discount by payment_id
+      const { data: discount } = await supabase
+        .from("discounts")
+        .select("*")
+        .eq("payment_id", paymentId)
+        .eq("invoice_id", invoiceId)
+        .single();
+
+      if (discount) {
+        await this.deleteDiscount(discount.id);
+        console.log(`✅ Discount reversed: PKR ${amount}`);
+      } else {
+        console.log("No discount found to reverse");
+      }
+    } catch (error) {
+      console.error("Error reversing discount:", error);
       throw error;
     }
   },
@@ -498,16 +263,109 @@ export const discountService = {
         discounts?.reduce((sum, discount) => sum + discount.amount, 0) || 0
       );
     } catch (error) {
-      // Fallback to ledger entries
-      const { data: ledgerEntries } = await supabase
-        .from("ledger_entries")
-        .select("credit")
-        .eq("customer_id", customerId)
-        .eq("type", "discount");
+      console.error("Error getting total discounts:", error);
+      return 0;
+    }
+  },
 
-      return (
-        ledgerEntries?.reduce((sum, entry) => sum + (entry.credit || 0), 0) || 0
-      );
+  // Update discount
+  async updateDiscount(
+    discountId: string,
+    updates: {
+      amount?: number;
+      reason?: string;
+      date?: string;
+    }
+  ): Promise<DiscountEntry> {
+    try {
+      console.log("Updating discount:", { discountId, updates });
+
+      // Get current discount
+      const { data: currentDiscount } = await supabase
+        .from("discounts")
+        .select("*")
+        .eq("id", discountId)
+        .single();
+
+      if (!currentDiscount) {
+        throw new Error("Discount not found");
+      }
+
+      // Update discount
+      const { data: discount, error } = await supabase
+        .from("discounts")
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", discountId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error updating discount:", error);
+        throw error;
+      }
+
+      // If amount or reason changed, update ledger entry
+      if (
+        (updates.amount !== undefined &&
+          updates.amount !== currentDiscount.amount) ||
+        (updates.reason !== undefined &&
+          updates.reason !== currentDiscount.reason)
+      ) {
+        // Remove old ledger entry
+        await supabase
+          .from("ledger_entries")
+          .delete()
+          .eq("reference_id", discountId)
+          .eq("type", "discount");
+
+        // Create new ledger entry with updated reason
+        let description = `Discount`;
+
+        // Use the updated reason
+        if (updates.reason || discount.reason) {
+          const reason = updates.reason || discount.reason;
+          description = `Discount: ${reason}`;
+        }
+
+        // Add invoice reference if applicable
+        if (discount.invoice_id) {
+          try {
+            const { data: invoice } = await supabase
+              .from("invoices")
+              .select("invoice_number")
+              .eq("id", discount.invoice_id)
+              .single();
+
+            if (invoice) {
+              description += ` (Invoice: ${invoice.invoice_number})`;
+            }
+          } catch (invoiceError) {
+            description += ` (Invoice)`;
+          }
+        }
+
+        await ledgerService.addLedgerEntry({
+          customer_id: discount.customer_id,
+          date: updates.date || discount.date,
+          type: "discount",
+          reference_id: discountId,
+          reference_number: discount.reference_number,
+          debit: 0,
+          credit: updates.amount || discount.amount,
+          description: description,
+        });
+
+        // Recalculate customer balance
+        await ledgerService.recalculateCustomerBalance(discount.customer_id);
+      }
+
+      return discount;
+    } catch (error) {
+      console.error("Error updating discount:", error);
+      throw error;
     }
   },
 };

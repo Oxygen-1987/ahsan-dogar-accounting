@@ -178,13 +178,40 @@ export const pdfService = {
             break;
 
           case "discount":
-            const discountInvoiceMatch = entry.description?.match(
-              /invoice\s+([A-Z0-9-]+)/i
-            );
-            const discountInvoice = discountInvoiceMatch
-              ? discountInvoiceMatch[1]
-              : "Invoice";
-            description = `Discount on ${discountInvoice}`;
+            // Handle discount descriptions
+            const discountDescription = entry.description || "";
+
+            if (discountDescription.startsWith("Discount: ")) {
+              // Remove "Discount: " prefix and show just the reason
+              const reason = discountDescription.substring(10); // Remove "Discount: "
+
+              // Check for invoice reference in the description
+              const invoiceMatch = reason.match(/Invoice: ([A-Z0-9-]+)/i);
+              if (invoiceMatch) {
+                description = `Discount (Invoice: ${invoiceMatch[1]})`;
+              } else if (
+                reason.includes("against Bill") ||
+                reason.includes("against Invoice")
+              ) {
+                // If description contains "against Bill" or "against Invoice", just show the full reason
+                description = reason;
+              } else {
+                // Otherwise just show the reason
+                description = reason;
+              }
+            } else if (discountDescription.startsWith("Discount")) {
+              // If it just starts with "Discount" without colon
+              description = discountDescription;
+            } else {
+              // Original fallback logic
+              const discountInvoiceMatch = entry.description?.match(
+                /invoice\s+([A-Z0-9-]+)/i
+              );
+              const discountInvoice = discountInvoiceMatch
+                ? discountInvoiceMatch[1]
+                : "Invoice";
+              description = `Discount on ${discountInvoice}`;
+            }
             break;
 
           default:

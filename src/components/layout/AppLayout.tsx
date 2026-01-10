@@ -15,6 +15,7 @@ import {
   UserOutlined,
   FileTextOutlined,
   CreditCardOutlined,
+  PercentageOutlined,
   BarChartOutlined,
   SettingOutlined,
   SearchOutlined,
@@ -141,6 +142,11 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       key: "/payments",
       icon: <CreditCardOutlined />,
       label: "Payment Management",
+    },
+    {
+      key: "/discounts", // ADD THIS MENU ITEM
+      icon: <PercentageOutlined />,
+      label: "Discounts",
     },
     {
       key: "/expenses",

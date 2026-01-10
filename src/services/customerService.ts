@@ -1,7 +1,6 @@
 import { supabase } from "./supabaseClient";
 import type { Customer, CustomerFormData } from "../types";
 import { ledgerService } from "./ledgerService";
-import { paymentApplicationService } from "./paymentApplicationService"; // NEW
 
 export const customerService = {
   // Check if customers table has proper structure
@@ -42,7 +41,7 @@ export const customerService = {
     await this.checkTableStructure();
   },
 
-  // Get all customers with summary
+  // Get all customers with outstanding balance
   async getAllCustomers(): Promise<{ customers: Customer[]; summary: any }> {
     try {
       const { data: customers, error } = await supabase
@@ -52,12 +51,11 @@ export const customerService = {
 
       if (error) throw error;
 
-      const customersWithActualBalance = await Promise.all(
+      // Calculate outstanding balance for each customer
+      const customersWithBalance = await Promise.all(
         (customers || []).map(async (customer) => {
           try {
-            console.log(`Calculating balance for ${customer.company_name}`);
-
-            // Get ALL ledger entries for this customer
+            // Calculate balance from ledger entries
             const { data: allEntries } = await supabase
               .from("ledger_entries")
               .select("*")
@@ -65,84 +63,65 @@ export const customerService = {
               .order("date", { ascending: true })
               .order("created_at", { ascending: true });
 
-            let actualBalance = 0;
+            let currentBalance = 0;
 
             if (allEntries && allEntries.length > 0) {
-              // Calculate from ALL entries
+              // Calculate from ALL non-hidden entries
               allEntries.forEach((entry) => {
-                if (entry.type === "opening_balance") {
-                  // Opening balance: add debit amount
-                  actualBalance += entry.debit || 0;
-                } else if (!entry.is_hidden) {
-                  // Regular non-hidden entries
-                  actualBalance =
-                    actualBalance + (entry.debit || 0) - (entry.credit || 0);
+                if (!entry.is_hidden) {
+                  currentBalance =
+                    currentBalance + (entry.debit || 0) - (entry.credit || 0);
                 }
-                // Skip hidden entries (opening balance payments)
               });
             } else {
-              // No entries yet, balance = opening_balance
-              actualBalance = customer.opening_balance || 0;
+              // If no entries, balance = opening_balance
+              currentBalance = customer.opening_balance || 0;
             }
 
-            console.log(
-              `Balance for ${customer.company_name}: ${actualBalance} (was ${customer.current_balance})`
-            );
-
             // Sync if needed
-            if (Math.abs(customer.current_balance - actualBalance) > 0.01) {
+            if (Math.abs(customer.current_balance - currentBalance) > 0.01) {
               console.log(
-                `Syncing ${customer.company_name}: ${customer.current_balance} → ${actualBalance}`
+                `Syncing ${customer.company_name}: ${customer.current_balance} → ${currentBalance}`
               );
 
-              const { error: syncError } = await supabase
+              await supabase
                 .from("customers")
                 .update({
-                  current_balance: actualBalance,
+                  current_balance: currentBalance,
                   updated_at: new Date().toISOString(),
                 })
                 .eq("id", customer.id);
-
-              if (!syncError) {
-                console.log(`✅ Synced ${customer.company_name}`);
-              }
             }
 
             return {
               ...customer,
-              current_balance: actualBalance,
+              current_balance: currentBalance,
             };
           } catch (error) {
             console.error(
               `Error calculating balance for customer ${customer.id}:`,
               error
             );
-            return customer; // Return as-is on error
+            return customer;
           }
         })
       );
 
       // Calculate summary based on ACTUAL balances
-      const totalOutstanding = customersWithActualBalance.reduce(
-        (sum, customer) => {
-          return sum + Math.max(0, customer.current_balance);
-        },
-        0
-      );
+      const totalOutstanding = customersWithBalance.reduce((sum, customer) => {
+        return sum + Math.max(0, customer.current_balance);
+      }, 0);
 
-      const totalPaid = customersWithActualBalance.reduce((sum, customer) => {
+      const totalCredit = customersWithBalance.reduce((sum, customer) => {
         return sum + Math.abs(Math.min(0, customer.current_balance));
       }, 0);
 
-      const totalOpenInvoices = 0;
-
       return {
-        customers: customersWithActualBalance,
+        customers: customersWithBalance,
         summary: {
-          totalClients: customersWithActualBalance.length,
+          totalClients: customersWithBalance.length,
           totalOutstanding,
-          totalOpenInvoices,
-          totalPaid,
+          totalCredit,
         },
       };
     } catch (error) {
@@ -171,7 +150,7 @@ export const customerService = {
         country: customerData.country || "Pakistan",
         notes: customerData.notes || null,
         opening_balance: customerData.opening_balance || 0,
-        current_balance: customerData.opening_balance || 0,
+        current_balance: customerData.opening_balance || 0, // Set current_balance = opening_balance
         as_of_date: customerData.as_of_date
           ? customerData.as_of_date
           : new Date().toISOString().split("T")[0],
@@ -193,13 +172,30 @@ export const customerService = {
 
       console.log("Customer created successfully:", data);
 
-      // Create opening balance ledger entry if opening balance is not zero
+      // CRITICAL: Create opening balance ledger entry
       if (customerData.opening_balance !== 0) {
-        await this.ensureSingleOpeningBalanceEntry(
-          data.id,
-          customerData.opening_balance,
-          customerData.as_of_date || new Date().toISOString().split("T")[0]
-        );
+        console.log("Creating opening balance ledger entry...");
+
+        await ledgerService.addLedgerEntry({
+          customer_id: data.id,
+          date:
+            customerData.as_of_date || new Date().toISOString().split("T")[0],
+          type: "opening_balance",
+          reference_id: data.id,
+          reference_number: "OPENING",
+          debit:
+            customerData.opening_balance > 0
+              ? Math.abs(customerData.opening_balance)
+              : 0,
+          credit:
+            customerData.opening_balance < 0
+              ? Math.abs(customerData.opening_balance)
+              : 0,
+          description: "Opening Balance",
+          is_hidden: false, // IMPORTANT: NOT hidden
+        });
+
+        console.log("✅ Opening balance ledger entry created");
       }
 
       console.log("=== CREATE CUSTOMER COMPLETE ===");
@@ -316,7 +312,7 @@ export const customerService = {
     }
   },
 
-  // Get customer by ID - FIXED VERSION
+  // Get customer by ID
   async getCustomerById(id: string): Promise<Customer | null> {
     try {
       console.log("=== getCustomerById ===");
@@ -339,7 +335,7 @@ export const customerService = {
         current_balance: customer.current_balance,
       });
 
-      // Get ALL ledger entries for balance calculation
+      // Get ALL ledger entries (including opening balance)
       const { data: allEntries } = await supabase
         .from("ledger_entries")
         .select("*")
@@ -352,16 +348,10 @@ export const customerService = {
       if (allEntries && allEntries.length > 0) {
         console.log(`Found ${allEntries.length} ledger entries`);
 
-        // Calculate balance from ALL entries (except hidden ones that are credits)
+        // Calculate balance from ALL ledger entries
         allEntries.forEach((entry, index) => {
-          if (entry.type === "opening_balance") {
-            // Opening balance entry: add the debit amount
-            actualBalance += entry.debit || 0;
-            console.log(
-              `[${index}] Opening balance: +${entry.debit} = ${actualBalance}`
-            );
-          } else if (!entry.is_hidden) {
-            // Regular non-hidden entries
+          // Skip hidden entries for balance calculation
+          if (!entry.is_hidden) {
             actualBalance =
               actualBalance + (entry.debit || 0) - (entry.credit || 0);
             console.log(
@@ -369,18 +359,12 @@ export const customerService = {
                 entry.credit || 0
               } = ${actualBalance}`
             );
-          } else {
-            // Hidden entries (opening balance payments) - these are CREDITS
-            // They reduce the balance, but since they're hidden, we need to handle them
-            console.log(
-              `[${index}] Hidden ${entry.type}: Credit ${entry.credit} (not affecting running balance)`
-            );
           }
         });
       } else {
-        console.log("No ledger entries found");
-        // If no entries, balance should be opening_balance
+        // If no ledger entries, balance should be opening_balance
         actualBalance = customer.opening_balance || 0;
+        console.log("No ledger entries, using opening_balance:", actualBalance);
       }
 
       console.log("Calculated balance:", actualBalance);
@@ -417,113 +401,121 @@ export const customerService = {
     }
   },
 
-  // NEW: Get customer opening balance summary (UPDATED)
-  async getCustomerOpeningBalance(customerId: string): Promise<{
-    amount: number;
-    date: string;
-    isPositive: boolean;
-    paidAmount: number;
-    remainingAmount: number;
-    payments?: any[];
-  }> {
+  // Get customer outstanding balance
+  async getCustomerOutstandingBalance(customerId: string): Promise<number> {
     try {
-      console.log("=== GET OPENING BALANCE ===");
+      console.log("=== getCustomerOutstandingBalance ===");
 
       // Get customer
-      const { data: customer, error } = await supabase
+      const { data: customer } = await supabase
         .from("customers")
-        .select("opening_balance, as_of_date")
+        .select("opening_balance")
         .eq("id", customerId)
         .single();
 
-      if (error || !customer) {
-        console.log("Customer not found");
-        return {
-          amount: 0,
-          date: "",
-          isPositive: true,
-          paidAmount: 0,
-          remainingAmount: 0,
-        };
+      if (!customer) return 0;
+
+      // Get ALL ledger entries
+      const { data: allEntries } = await supabase
+        .from("ledger_entries")
+        .select("*")
+        .eq("customer_id", customerId)
+        .order("date", { ascending: true })
+        .order("created_at", { ascending: true });
+
+      let balance = 0;
+
+      if (allEntries && allEntries.length > 0) {
+        console.log(`Found ${allEntries.length} ledger entries`);
+
+        // Calculate balance from ALL non-hidden ledger entries
+        allEntries.forEach((entry) => {
+          if (!entry.is_hidden) {
+            balance = balance + (entry.debit || 0) - (entry.credit || 0);
+          }
+        });
+      } else {
+        // If no ledger entries, balance is opening_balance
+        balance = customer.opening_balance || 0;
+        console.log("No ledger entries, using opening_balance:", balance);
       }
 
-      console.log("Customer found:", {
-        opening_balance: customer.opening_balance,
-        as_of_date: customer.as_of_date,
-      });
-
-      let paidAmount = 0;
-      let paymentDetails = [];
-
-      // TRY NEW SYSTEM FIRST
-      try {
-        const { data: newPayments, error: newError } = await supabase
-          .from("customer_payment_applications")
-          .select("*")
-          .eq("customer_id", customerId)
-          .is("invoice_id", null); // NULL = opening balance payments
-
-        if (!newError && newPayments) {
-          paidAmount = newPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
-          paymentDetails = newPayments;
-          console.log(`Found ${newPayments.length} payments in NEW system:`, {
-            paidAmount,
-            payments: newPayments,
-          });
-        }
-      } catch (tableError) {
-        console.log("New table might not exist yet");
-      }
-
-      // If no payments in new system, check old system
-      if (paidAmount === 0) {
-        console.log("Checking OLD system...");
-        const { data: hiddenEntries } = await supabase
-          .from("ledger_entries")
-          .select("*")
-          .eq("customer_id", customerId)
-          .eq("is_hidden", true);
-
-        if (hiddenEntries && hiddenEntries.length > 0) {
-          paidAmount = hiddenEntries.reduce(
-            (sum, e) => sum + (e.credit || 0),
-            0
-          );
-          console.log(
-            `Found ${hiddenEntries.length} hidden entries:`,
-            paidAmount
-          );
-        }
-      }
-
-      const remainingAmount = Math.max(
-        0,
-        customer.opening_balance - paidAmount
-      );
-
-      console.log("FINAL CALCULATION:", {
-        opening: customer.opening_balance,
-        paid: paidAmount,
-        remaining: remainingAmount,
-      });
-
-      return {
-        amount: customer.opening_balance || 0,
-        date: customer.as_of_date || "",
-        isPositive: true,
-        paidAmount,
-        remainingAmount,
-        payments: paymentDetails,
-      };
+      console.log("Final outstanding balance:", balance);
+      return balance;
     } catch (error) {
-      console.error("Error in getCustomerOpeningBalance:", error);
-      return {
-        amount: 0,
-        date: "",
-        isPositive: true,
-        paidAmount: 0,
-        remainingAmount: 0,
-      };
+      console.error("Error calculating outstanding balance:", error);
+
+      // Fallback: get customer current_balance
+      try {
+        const { data: customer } = await supabase
+          .from("customers")
+          .select("current_balance")
+          .eq("id", customerId)
+          .single();
+
+        return customer?.current_balance || 0;
+      } catch (fallbackError) {
+        return 0;
+      }
+    }
+  },
+
+  // In customerService.ts - ADD this method if not exists
+  async recalculateCustomerBalance(customerId: string): Promise<number> {
+    try {
+      console.log("=== RECALCULATE CUSTOMER BALANCE ===");
+
+      // Get ALL ledger entries for this customer
+      const { data: allEntries } = await supabase
+        .from("ledger_entries")
+        .select("*")
+        .eq("customer_id", customerId)
+        .order("date", { ascending: true })
+        .order("created_at", { ascending: true });
+
+      let calculatedBalance = 0;
+
+      if (allEntries && allEntries.length > 0) {
+        // Calculate balance from ALL non-hidden entries
+        allEntries.forEach((entry) => {
+          if (!entry.is_hidden) {
+            calculatedBalance =
+              calculatedBalance + (entry.debit || 0) - (entry.credit || 0);
+          }
+        });
+      } else {
+        // If no entries, get opening balance from customer table
+        const { data: customer } = await supabase
+          .from("customers")
+          .select("opening_balance")
+          .eq("id", customerId)
+          .single();
+
+        calculatedBalance = customer?.opening_balance || 0;
+      }
+
+      console.log("Calculated balance:", calculatedBalance);
+
+      // Update customer record
+      const { error: updateError } = await supabase
+        .from("customers")
+        .update({
+          current_balance: calculatedBalance,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", customerId);
+
+      if (updateError) {
+        console.error("Error updating customer balance:", updateError);
+      } else {
+        console.log("✅ Customer balance updated to:", calculatedBalance);
+      }
+
+      console.log("=== RECALCULATION COMPLETE ===");
+      return calculatedBalance;
+    } catch (error) {
+      console.error("Error in recalculateCustomerBalance:", error);
+      return 0;
     }
   },
 
@@ -761,53 +753,46 @@ export const customerService = {
       console.log("Opening Balance:", openingBalance);
       console.log("As of Date:", asOfDate);
 
-      // Try to find existing opening balance entry
-      let existingEntryId: string | null = null;
-
-      // Look for existing opening balance ledger entry
-      try {
-        const { data: entry } = await supabase
-          .from("ledger_entries")
-          .select("id, type, description")
-          .eq("customer_id", customerId)
-          .eq("type", "opening_balance")
-          .maybeSingle();
-
-        if (entry) {
-          existingEntryId = entry.id;
-          console.log("Found existing opening balance ledger entry:", entry);
-        }
-      } catch (error) {
-        console.log("No existing opening balance ledger entry found");
+      if (openingBalance === 0) {
+        console.log("Opening balance is 0, no ledger entry needed");
+        return;
       }
 
-      // Prepare entry data
-      const entryData: any = {
+      // Check if opening balance entry already exists
+      const { data: existingEntry } = await supabase
+        .from("ledger_entries")
+        .select("id")
+        .eq("customer_id", customerId)
+        .eq("type", "opening_balance")
+        .single();
+
+      const entryData = {
         customer_id: customerId,
         date: asOfDate,
+        type: "opening_balance",
         reference_id: customerId,
         reference_number: "OPENING",
         debit: openingBalance > 0 ? Math.abs(openingBalance) : 0,
         credit: openingBalance < 0 ? Math.abs(openingBalance) : 0,
+        balance: openingBalance, // IMPORTANT: Set the initial balance
         description: "Opening Balance",
-        updated_at: new Date().toISOString(),
-        type: "opening_balance",
+        is_hidden: false, // Make sure it's NOT hidden
       };
 
-      if (existingEntryId) {
-        // UPDATE existing entry
-        console.log(`Updating existing ledger entry (ID: ${existingEntryId})`);
+      if (existingEntry) {
+        // Update existing entry
+        console.log(`Updating existing ledger entry (ID: ${existingEntry.id})`);
         const { error: updateError } = await supabase
           .from("ledger_entries")
           .update(entryData)
-          .eq("id", existingEntryId);
+          .eq("id", existingEntry.id);
 
         if (updateError) {
           console.error("Update failed:", updateError.message);
           throw updateError;
         }
       } else {
-        // CREATE new entry
+        // Create new entry
         console.log(`Creating new opening balance ledger entry`);
         const { error: insertError } = await supabase
           .from("ledger_entries")
@@ -825,183 +810,12 @@ export const customerService = {
 
       // Recalculate customer balance
       console.log("Recalculating customer balance...");
-      await ledgerService.recalculateCustomerBalance(customerId);
+      await this.recalculateCustomerBalance(customerId);
 
       console.log("=== OPENING BALANCE LEDGER ENTRY COMPLETE ===");
     } catch (error) {
       console.error("❌ Error in ensureSingleOpeningBalanceEntry:", error);
       throw error;
-    }
-  },
-
-  // NEW: Update customer opening balance based on payments
-  async updateCustomerOpeningBalance(customerId: string): Promise<{
-    originalAmount: number;
-    paidAmount: number;
-    remainingAmount: number;
-  }> {
-    try {
-      console.log("=== UPDATE CUSTOMER OPENING BALANCE ===");
-
-      // Get current opening balance
-      const { data: customer } = await supabase
-        .from("customers")
-        .select("opening_balance")
-        .eq("id", customerId)
-        .single();
-
-      if (!customer) {
-        throw new Error("Customer not found");
-      }
-
-      const originalAmount = customer.opening_balance || 0;
-
-      // Try to get opening balance payments from new system
-      let paidAmount = 0;
-
-      try {
-        const { data: openingBalancePayments, error } = await supabase
-          .from("customer_payment_applications")
-          .select("amount")
-          .eq("customer_id", customerId)
-          .is("invoice_id", null); // NULL invoice_id means opening balance payment
-
-        if (!error && openingBalancePayments) {
-          paidAmount = openingBalancePayments.reduce(
-            (sum, payment) => sum + (payment.amount || 0),
-            0
-          );
-        }
-      } catch (tableError) {
-        console.log("customer_payment_applications table might not exist yet");
-        // Fallback to hidden entries
-        const { data: hiddenEntries } = await supabase
-          .from("ledger_entries")
-          .select("credit")
-          .eq("customer_id", customerId)
-          .eq("is_hidden", true)
-          .or(
-            "description.ilike.%opening balance%,type.eq.opening_balance_payment"
-          );
-
-        if (hiddenEntries) {
-          paidAmount = hiddenEntries.reduce(
-            (sum, entry) => sum + (entry.credit || 0),
-            0
-          );
-        }
-      }
-
-      const remainingAmount = Math.max(0, originalAmount - paidAmount);
-
-      console.log("Opening balance calculation:", {
-        originalAmount,
-        paidAmount,
-        remainingAmount,
-      });
-
-      // Update customer's opening_balance field if needed
-      if (Math.abs(customer.opening_balance - remainingAmount) > 0.01) {
-        await supabase
-          .from("customers")
-          .update({
-            opening_balance: remainingAmount,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", customerId);
-
-        console.log(
-          `✅ Updated customer opening_balance to ${remainingAmount}`
-        );
-      }
-
-      console.log("=== UPDATE COMPLETE ===");
-
-      return {
-        originalAmount,
-        paidAmount,
-        remainingAmount,
-      };
-    } catch (error) {
-      console.error("Error in updateCustomerOpeningBalance:", error);
-      throw error;
-    }
-  },
-
-  // Debug function
-  async debugBalanceMismatch(customerId: string): Promise<any> {
-    try {
-      console.log("=== DEBUG BALANCE MISMATCH ===");
-
-      // Get customer
-      const { data: customer, error: customerError } = await supabase
-        .from("customers")
-        .select("*")
-        .eq("id", customerId)
-        .single();
-
-      if (customerError) {
-        console.error("Error fetching customer:", customerError);
-        return null;
-      }
-
-      console.log("Customer from database:", {
-        company_name: customer.company_name,
-        opening_balance: customer.opening_balance,
-        current_balance: customer.current_balance,
-        as_of_date: customer.as_of_date,
-      });
-
-      // Calculate balance from non-hidden ledger entries
-      const { data: ledgerEntries, error: ledgerError } = await supabase
-        .from("ledger_entries")
-        .select("*")
-        .eq("customer_id", customerId)
-        .eq("is_hidden", false)
-        .order("date", { ascending: true })
-        .order("created_at", { ascending: true });
-
-      if (ledgerError) {
-        console.error("Error fetching ledger entries:", ledgerError);
-        return null;
-      }
-
-      console.log(
-        "Total non-hidden ledger entries:",
-        ledgerEntries?.length || 0
-      );
-
-      let calculatedBalance = 0;
-      if (ledgerEntries && ledgerEntries.length > 0) {
-        console.log("Ledger entries in chronological order:");
-        ledgerEntries.forEach((entry, index) => {
-          calculatedBalance =
-            calculatedBalance + (entry.debit || 0) - (entry.credit || 0);
-          console.log(
-            `[${index}] ${entry.date} ${entry.type} - ${entry.description}`
-          );
-          console.log(
-            `    Debit: ${entry.debit}, Credit: ${entry.credit}, Running Balance: ${calculatedBalance}`
-          );
-        });
-      }
-
-      console.log("=== SUMMARY ===");
-      console.log("Database current_balance:", customer.current_balance);
-      console.log("Calculated from ledger:", calculatedBalance);
-      console.log(
-        "Difference:",
-        calculatedBalance - parseFloat(customer.current_balance || 0)
-      );
-
-      return {
-        customer,
-        calculatedBalance,
-        ledgerEntries: ledgerEntries || [],
-      };
-    } catch (error) {
-      console.error("Error in debugBalanceMismatch:", error);
-      return null;
     }
   },
 
@@ -1047,99 +861,6 @@ export const customerService = {
     } catch (error) {
       console.error("Error fixing customer balance:", error);
       return false;
-    }
-  },
-
-  // Repair customer and all related invoices
-  async repairCustomerAndInvoices(customerId: string): Promise<void> {
-    try {
-      console.log("=== REPAIR CUSTOMER AND INVOICES ===");
-
-      const { data: invoices } = await supabase
-        .from("invoices")
-        .select("*")
-        .eq("customer_id", customerId);
-
-      if (invoices && invoices.length > 0) {
-        for (const invoice of invoices) {
-          console.log(`Repairing invoice ${invoice.invoice_number}`);
-
-          const { data: allocations } = await supabase
-            .from("payment_allocations")
-            .select("amount")
-            .eq("invoice_id", invoice.id);
-
-          let totalPaid = 0;
-          if (allocations) {
-            totalPaid = allocations.reduce(
-              (sum, alloc) => sum + (alloc.amount || 0),
-              0
-            );
-          }
-
-          const { data: directPayments } = await supabase
-            .from("payments")
-            .select("total_received")
-            .eq("invoice_id", invoice.id);
-
-          if (directPayments) {
-            directPayments.forEach((payment) => {
-              totalPaid += payment.total_received || 0;
-            });
-          }
-
-          const { data: discountEntries } = await supabase
-            .from("ledger_entries")
-            .select("credit")
-            .eq("customer_id", customerId)
-            .eq("type", "discount")
-            .ilike("description", `%${invoice.invoice_number}%`);
-
-          if (discountEntries) {
-            discountEntries.forEach((discount) => {
-              totalPaid += discount.credit || 0;
-            });
-          }
-
-          const newPendingAmount = Math.max(
-            0,
-            invoice.total_amount - totalPaid
-          );
-
-          let newStatus = invoice.status;
-          if (newPendingAmount === 0) {
-            newStatus = "paid";
-          } else if (totalPaid > 0 && newPendingAmount > 0) {
-            newStatus = "partial";
-          } else if (newPendingAmount === invoice.total_amount) {
-            newStatus = "sent";
-          }
-
-          console.log(`Invoice ${invoice.invoice_number}:`, {
-            total: invoice.total_amount,
-            calculatedPaid: totalPaid,
-            newPending: newPendingAmount,
-            newStatus,
-          });
-
-          await supabase
-            .from("invoices")
-            .update({
-              paid_amount: totalPaid,
-              pending_amount: newPendingAmount,
-              status: newStatus,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", invoice.id);
-        }
-      }
-
-      await this.fixCustomerBalance(customerId);
-
-      console.log("=== REPAIR COMPLETE ===");
-    } catch (error) {
-      console.error("Error in repairCustomerAndInvoices:", error);
-      throw error;
     }
   },
 };
