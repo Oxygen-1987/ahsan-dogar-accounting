@@ -1,0 +1,199 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.company_settings (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  company_name character varying NOT NULL DEFAULT 'Ahsan Dogar Rubber Works'::character varying,
+  address text,
+  phone character varying,
+  email character varying,
+  currency character varying DEFAULT 'PKR'::character varying,
+  date_format character varying DEFAULT 'DD/MM/YYYY'::character varying,
+  tax_rate numeric DEFAULT 0,
+  invoice_prefix character varying DEFAULT 'INV'::character varying,
+  payment_prefix character varying DEFAULT 'PAY'::character varying,
+  expense_prefix character varying DEFAULT 'EXP'::character varying,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT company_settings_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.customer_payment_applications (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  payment_id uuid NOT NULL,
+  customer_id uuid NOT NULL,
+  invoice_id uuid,
+  amount numeric NOT NULL CHECK (amount > 0::numeric),
+  application_date date NOT NULL,
+  notes text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT customer_payment_applications_pkey PRIMARY KEY (id),
+  CONSTRAINT customer_payment_applications_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES public.payments(id),
+  CONSTRAINT customer_payment_applications_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id),
+  CONSTRAINT customer_payment_applications_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id)
+);
+CREATE TABLE public.customers (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  first_name character varying NOT NULL,
+  last_name character varying NOT NULL,
+  company_name character varying NOT NULL,
+  mobile character varying NOT NULL,
+  phone character varying,
+  email character varying,
+  website character varying,
+  address text,
+  city character varying,
+  state character varying,
+  country character varying DEFAULT 'Pakistan'::character varying,
+  notes text,
+  opening_balance numeric DEFAULT 0,
+  current_balance numeric DEFAULT 0,
+  as_of_date date NOT NULL DEFAULT CURRENT_DATE,
+  status character varying DEFAULT 'active'::character varying,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT customers_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.discounts (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  customer_id uuid NOT NULL,
+  invoice_id uuid,
+  payment_id uuid,
+  amount numeric NOT NULL CHECK (amount > 0::numeric),
+  reason text,
+  date date NOT NULL,
+  reference_number character varying,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT discounts_pkey PRIMARY KEY (id),
+  CONSTRAINT discounts_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id),
+  CONSTRAINT discounts_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id),
+  CONSTRAINT discounts_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES public.payments(id)
+);
+CREATE TABLE public.expenses (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  expense_number character varying NOT NULL UNIQUE,
+  payee_name character varying NOT NULL,
+  amount numeric NOT NULL CHECK (amount > 0::numeric),
+  expense_date date NOT NULL,
+  category character varying NOT NULL,
+  payment_method character varying NOT NULL CHECK (payment_method::text = ANY (ARRAY['cash'::character varying, 'bank_transfer'::character varying, 'cheque'::character varying, 'parchi'::character varying, 'jazzcash'::character varying, 'easypaisa'::character varying]::text[])),
+  reference_number character varying,
+  description text,
+  status character varying DEFAULT 'paid'::character varying CHECK (status::text = ANY (ARRAY['pending'::character varying, 'paid'::character varying, 'cancelled'::character varying]::text[])),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  created_by uuid,
+  CONSTRAINT expenses_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.invoice_items (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  invoice_id uuid NOT NULL,
+  description text NOT NULL,
+  quantity numeric NOT NULL CHECK (quantity > 0::numeric),
+  inches numeric NOT NULL CHECK (inches >= 0::numeric),
+  rate numeric NOT NULL CHECK (rate >= 0::numeric),
+  amount numeric NOT NULL CHECK (amount >= 0::numeric),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT invoice_items_pkey PRIMARY KEY (id),
+  CONSTRAINT invoice_items_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id)
+);
+CREATE TABLE public.invoices (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  invoice_number character varying NOT NULL UNIQUE,
+  customer_id uuid NOT NULL,
+  issue_date date NOT NULL,
+  due_date date NOT NULL,
+  total_amount numeric NOT NULL CHECK (total_amount >= 0::numeric),
+  paid_amount numeric DEFAULT 0 CHECK (paid_amount >= 0::numeric),
+  pending_amount numeric DEFAULT 0 CHECK (pending_amount >= 0::numeric),
+  status character varying DEFAULT 'draft'::character varying CHECK (status::text = ANY (ARRAY['draft'::character varying, 'sent'::character varying, 'paid'::character varying, 'overdue'::character varying, 'partial'::character varying, 'cancelled'::character varying]::text[])),
+  notes text,
+  payment_terms text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT invoices_pkey PRIMARY KEY (id),
+  CONSTRAINT invoices_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id)
+);
+CREATE TABLE public.ledger_entries (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  customer_id uuid NOT NULL,
+  date date NOT NULL,
+  type character varying NOT NULL CHECK (type::text = ANY (ARRAY['invoice'::character varying, 'payment'::character varying, 'adjustment'::character varying, 'opening_balance'::character varying, 'discount'::character varying]::text[])),
+  reference_id uuid NOT NULL,
+  reference_number character varying NOT NULL,
+  debit numeric DEFAULT 0,
+  credit numeric DEFAULT 0,
+  balance numeric DEFAULT 0,
+  description text NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  is_hidden boolean DEFAULT false,
+  CONSTRAINT ledger_entries_pkey PRIMARY KEY (id),
+  CONSTRAINT ledger_entries_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id)
+);
+CREATE TABLE public.payment_distributions (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  payment_id uuid NOT NULL,
+  payee_name character varying NOT NULL,
+  payee_type character varying NOT NULL CHECK (payee_type::text = ANY (ARRAY['supplier'::character varying, 'expense'::character varying, 'owner'::character varying, 'other'::character varying]::text[])),
+  amount numeric NOT NULL CHECK (amount > 0::numeric),
+  purpose text NOT NULL,
+  allocation_date date NOT NULL,
+  status character varying DEFAULT 'allocated'::character varying CHECK (status::text = ANY (ARRAY['allocated'::character varying, 'cancelled'::character varying]::text[])),
+  notes text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT payment_distributions_pkey PRIMARY KEY (id),
+  CONSTRAINT payment_distributions_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES public.payments(id)
+);
+CREATE TABLE public.payments (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  payment_number character varying NOT NULL UNIQUE,
+  invoice_id uuid,
+  customer_id uuid NOT NULL,
+  payment_date date NOT NULL,
+  total_received numeric NOT NULL CHECK (total_received > 0::numeric),
+  payment_method character varying NOT NULL CHECK (payment_method::text = ANY (ARRAY['cash'::character varying::text, 'bank_transfer'::character varying::text, 'cheque'::character varying::text, 'parchi'::character varying::text, 'jazzcash'::character varying::text, 'easypaisa'::character varying::text])),
+  reference_number character varying,
+  bank_name character varying,
+  cheque_date date,
+  status character varying DEFAULT 'completed'::character varying CHECK (status::text = ANY (ARRAY['pending'::character varying, 'completed'::character varying, 'cancelled'::character varying, 'partial'::character varying]::text[])),
+  notes text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  created_by uuid,
+  discount_amount numeric DEFAULT 0,
+  net_received numeric DEFAULT 0,
+  CONSTRAINT payments_pkey PRIMARY KEY (id),
+  CONSTRAINT payments_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id),
+  CONSTRAINT payments_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id)
+);
+CREATE TABLE public.products (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name character varying NOT NULL,
+  description text,
+  default_rate numeric DEFAULT 0,
+  status character varying DEFAULT 'active'::character varying,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  is_predefined boolean DEFAULT false,
+  is_editable boolean DEFAULT true,
+  CONSTRAINT products_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.users (
+  id uuid NOT NULL,
+  email text NOT NULL UNIQUE,
+  full_name text,
+  company_name text,
+  phone text,
+  user_type text DEFAULT 'owner'::text,
+  avatar_url text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  company_logo_url text,
+  letterhead_url text,
+  CONSTRAINT users_pkey PRIMARY KEY (id),
+  CONSTRAINT users_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
+);

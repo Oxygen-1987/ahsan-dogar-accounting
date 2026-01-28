@@ -152,7 +152,7 @@ const EditPaymentModal: React.FC<EditPaymentModalProps> = ({
                 showSearch
                 filterOption={(input, option) =>
                   (option?.label?.toString().toLowerCase() ?? "").includes(
-                    input.toLowerCase()
+                    input.toLowerCase(),
                   )
                 }
                 options={customers.map((customer) => ({

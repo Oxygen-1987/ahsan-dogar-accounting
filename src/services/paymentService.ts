@@ -38,7 +38,7 @@ export const paymentService = {
           status
         ),
         distributions:payment_distributions(*)
-      `
+      `,
         )
         .order("created_at", { ascending: false });
 
@@ -51,7 +51,7 @@ export const paymentService = {
 
       const totalReceived = paymentsList.reduce(
         (sum, payment) => sum + payment.total_received,
-        0
+        0,
       );
 
       const totalDistributed = paymentsList.reduce(
@@ -59,9 +59,9 @@ export const paymentService = {
           sum +
           (payment.distributions?.reduce(
             (distSum, dist) => distSum + dist.amount,
-            0
+            0,
           ) || 0),
-        0
+        0,
       );
 
       const summary = {
@@ -91,7 +91,7 @@ export const paymentService = {
         *,
         customer:customers(*),
         distributions:payment_distributions(*)
-      `
+      `,
         )
         .eq("id", id)
         .single();
@@ -162,10 +162,99 @@ export const paymentService = {
     }
   },
 
+  // Generate customer-specific payment number
+  async generateCustomerPaymentNumber(customerId: string): Promise<string> {
+    try {
+      // Get customer details
+      const { data: customer, error: customerError } = await supabase
+        .from("customers")
+        .select("company_name")
+        .eq("id", customerId)
+        .single();
+
+      if (customerError) {
+        console.error("Error fetching customer:", customerError);
+        return `PAY-001`; // Fallback
+      }
+
+      // Extract prefix from company name
+      let prefix = "PAY";
+      if (customer?.company_name) {
+        // Get first 3 letters of company name, remove spaces, special chars
+        const cleanName = customer.company_name
+          .replace(/[^a-zA-Z0-9]/g, "") // Remove non-alphanumeric
+          .toUpperCase()
+          .substring(0, 3);
+
+        if (cleanName.length >= 3) {
+          prefix = `PAY-${cleanName}`;
+        }
+      }
+
+      // Get ALL payments for this customer to find the highest sequence
+      const { data: customerPayments, error: paymentsError } = await supabase
+        .from("payments")
+        .select("payment_number")
+        .eq("customer_id", customerId)
+        .order("created_at", { ascending: true });
+
+      if (paymentsError) {
+        console.error("Error fetching customer payments:", paymentsError);
+        return `${prefix}-001`;
+      }
+
+      let maxSequence = 0;
+
+      if (customerPayments && customerPayments.length > 0) {
+        console.log(`Found ${customerPayments.length} payments for customer`);
+
+        // Extract sequence numbers from existing payment numbers
+        customerPayments.forEach((payment) => {
+          const paymentNumber = payment.payment_number;
+
+          // Try to extract sequence number from various formats
+          // Format: PAY-XXX-NNN or PAY-NNN
+          const match = paymentNumber.match(/(?:PAY-)?(?:[A-Z]{3}-)?(\d+)$/);
+          if (match) {
+            const sequence = parseInt(match[1], 10);
+            if (!isNaN(sequence) && sequence > maxSequence) {
+              maxSequence = sequence;
+            }
+          } else {
+            // If no sequence found, check if it's just a number
+            const simpleMatch = paymentNumber.match(/(\d+)$/);
+            if (simpleMatch) {
+              const sequence = parseInt(simpleMatch[1], 10);
+              if (!isNaN(sequence) && sequence > maxSequence) {
+                maxSequence = sequence;
+              }
+            }
+          }
+        });
+
+        console.log(`Max sequence found for customer: ${maxSequence}`);
+      }
+
+      // Next sequence is max + 1 (or 1 if no payments found)
+      const nextSequence = maxSequence > 0 ? maxSequence + 1 : 1;
+
+      // Generate payment number
+      const paymentNumber = `${prefix}-${nextSequence.toString().padStart(3, "0")}`;
+      console.log(
+        `Generated payment number: ${paymentNumber} for customer ${customer?.company_name}`,
+      );
+
+      return paymentNumber;
+    } catch (error) {
+      console.error("Error generating payment number:", error);
+      return `PAY-001`; // Fallback
+    }
+  },
+
   // Create customer payment
   async createCustomerPayment(paymentData: {
     customer_id: string;
-    payment_number?: string; // This should come from form
+    payment_number?: string; // Optional - if provided, use it; otherwise auto-generate
     payment_date: string;
     total_received: number;
     payment_method: PaymentMethod;
@@ -177,36 +266,38 @@ export const paymentService = {
     try {
       console.log("Creating payment with data:", paymentData);
 
-      // Use the payment number from the form, or generate if not provided
+      // Generate customer-specific payment number if not provided
       let paymentNumber = paymentData.payment_number;
 
-      // If no payment number provided, generate one
       if (!paymentNumber || paymentNumber.trim() === "") {
-        const { data: lastPayment, error: lastPaymentError } = await supabase
-          .from("payments")
-          .select("payment_number")
-          .order("created_at", { ascending: false })
-          .limit(1);
-
-        const currentYear = new Date().getFullYear();
-        let nextSequence = 1;
-
-        if (!lastPaymentError && lastPayment && lastPayment.length > 0) {
-          const lastNumber = lastPayment[0].payment_number;
-          console.log("Last payment number:", lastNumber);
-
-          const match = lastNumber.match(/PAY-(\d+)-(\d+)/);
-          if (match && parseInt(match[1]) === currentYear) {
-            nextSequence = parseInt(match[2]) + 1;
-          }
-        }
-
-        paymentNumber = `PAY-${currentYear}-${nextSequence
-          .toString()
-          .padStart(3, "0")}`;
+        paymentNumber = await this.generateCustomerPaymentNumber(
+          paymentData.customer_id,
+        );
       }
 
       console.log("Using payment number:", paymentNumber);
+
+      // Check if payment number already exists (case-insensitive)
+      const { data: existingPayment, error: checkError } = await supabase
+        .from("payments")
+        .select("id")
+        .eq("payment_number", paymentNumber)
+        .maybeSingle();
+
+      if (checkError) {
+        console.warn("Error checking duplicate payment number:", checkError);
+      }
+
+      if (existingPayment) {
+        // If duplicate exists, generate a new one
+        console.log(
+          `Payment number ${paymentNumber} already exists, generating new one...`,
+        );
+        paymentNumber = await this.generateCustomerPaymentNumber(
+          paymentData.customer_id,
+        );
+        console.log("New payment number:", paymentNumber);
+      }
 
       // Determine payment status
       let paymentStatus: PaymentStatus = "completed";
@@ -265,13 +356,15 @@ export const paymentService = {
           date: paymentData.payment_date,
           type: "payment",
           reference_id: payment.id,
-          reference_number: payment.payment_number,
+          reference_number: paymentNumber, // Make sure this is the NEW payment number
           debit: 0,
           credit: paymentData.total_received,
-          description: `Payment ${payment.payment_number}`,
+          description: `Payment ${paymentNumber}`, // Use the NEW payment number
         });
-
-        console.log("✅ Ledger entry created");
+        console.log(
+          "✅ Ledger entry created with payment number:",
+          paymentNumber,
+        );
       } catch (ledgerError: any) {
         console.error("❌ Failed to create ledger entry:", ledgerError.message);
       }
@@ -288,7 +381,7 @@ export const paymentService = {
       *,
       customer:customers(*),
       distributions:payment_distributions(*)
-    `
+    `,
           )
           .eq("id", payment.id)
           .single();
@@ -312,7 +405,7 @@ export const paymentService = {
     } catch (error: any) {
       console.error("Error in createCustomerPayment:", error);
       throw new Error(
-        `Payment creation failed: ${error.message || "Unknown error"}`
+        `Payment creation failed: ${error.message || "Unknown error"}`,
       );
     }
   },
@@ -320,7 +413,7 @@ export const paymentService = {
   // Update payment
   async updatePayment(
     paymentId: string,
-    updates: Partial<PaymentFormData>
+    updates: Partial<PaymentFormData>,
   ): Promise<Payment | null> {
     try {
       console.log("Updating payment:", { paymentId, updates });
@@ -374,8 +467,8 @@ export const paymentService = {
             if (chequeDateObj.isAfter(today, "day")) {
               throw new Error(
                 `Cannot mark cheque as completed. Cheque date (${chequeDateObj.format(
-                  "DD/MM/YYYY"
-                )}) is in the future.`
+                  "DD/MM/YYYY",
+                )}) is in the future.`,
               );
             }
           }
@@ -432,7 +525,7 @@ export const paymentService = {
   // Add distribution to payment
   async addDistribution(
     paymentId: string,
-    distributionData: PaymentDistributionFormData
+    distributionData: PaymentDistributionFormData,
   ): Promise<PaymentDistribution> {
     try {
       console.log("Adding distribution:", { paymentId, distributionData });
@@ -463,7 +556,7 @@ export const paymentService = {
     } catch (error: any) {
       console.log("Error adding distribution:", error);
       throw new Error(
-        `Distribution failed: ${error.message || "Unknown error"}`
+        `Distribution failed: ${error.message || "Unknown error"}`,
       );
     }
   },
@@ -472,7 +565,7 @@ export const paymentService = {
   async updatePaymentStatus(
     id: string,
     status: PaymentStatus,
-    chequeDate?: string
+    chequeDate?: string,
   ): Promise<Payment> {
     try {
       console.log("Updating payment status:", { id, status, chequeDate });
@@ -490,8 +583,8 @@ export const paymentService = {
         if (chequeDateObj.isAfter(today, "day")) {
           throw new Error(
             `Cannot mark cheque as completed. Cheque date (${chequeDateObj.format(
-              "DD/MM/YYYY"
-            )}) is in the future.`
+              "DD/MM/YYYY",
+            )}) is in the future.`,
           );
         }
       }
@@ -515,7 +608,7 @@ export const paymentService = {
           `
         *,
         customer:customers(*)
-      `
+      `,
         )
         .eq("id", id)
         .single();
@@ -523,7 +616,7 @@ export const paymentService = {
       if (fetchError) {
         console.log("Supabase fetch error:", fetchError);
         throw new Error(
-          `Failed to fetch updated payment: ${fetchError.message}`
+          `Failed to fetch updated payment: ${fetchError.message}`,
         );
       }
 
@@ -539,7 +632,7 @@ export const paymentService = {
     } catch (error: any) {
       console.log("Error updating payment status:", error);
       throw new Error(
-        `Status update failed: ${error.message || "Unknown error"}`
+        `Status update failed: ${error.message || "Unknown error"}`,
       );
     }
   },
@@ -571,21 +664,21 @@ export const paymentService = {
         discountAmount = payment.discount_amount || 0;
         discountInvoiceId = payment.discount_invoice_id || null;
         console.log(
-          `🔄 Payment has discount: PKR ${discountAmount} on invoice ${discountInvoiceId}`
+          `🔄 Payment has discount: PKR ${discountAmount} on invoice ${discountInvoiceId}`,
         );
       }
 
       // Handle discount reversal if any
       if (hasDiscount && discountInvoiceId && discountAmount > 0) {
         console.log(
-          `🔄 Reversing discount: PKR ${discountAmount} from invoice ${discountInvoiceId}`
+          `🔄 Reversing discount: PKR ${discountAmount} from invoice ${discountInvoiceId}`,
         );
 
         try {
           await discountService.reverseDiscount(
             payment.id,
             discountInvoiceId,
-            discountAmount
+            discountAmount,
           );
           console.log("✅ Discount reversed");
         } catch (discountError) {
@@ -631,7 +724,7 @@ export const paymentService = {
       await ledgerService.recalculateCustomerBalance(payment.customer_id);
 
       console.log(
-        "✅ DELETE PAYMENT COMPLETED SUCCESSFULLY ======================"
+        "✅ DELETE PAYMENT COMPLETED SUCCESSFULLY ======================",
       );
     } catch (error: any) {
       console.error("❌ ERROR in deletePayment:", error);
@@ -648,7 +741,7 @@ export const paymentService = {
           `
         *,
         distributions:payment_distributions(*)
-      `
+      `,
         )
         .eq("customer_id", customerId)
         .order("payment_date", { ascending: false });
@@ -662,7 +755,7 @@ export const paymentService = {
     } catch (error: any) {
       console.log("Error getting customer payments:", error);
       throw new Error(
-        `Failed to get customer payments: ${error.message || "Unknown error"}`
+        `Failed to get customer payments: ${error.message || "Unknown error"}`,
       );
     }
   },
@@ -670,7 +763,7 @@ export const paymentService = {
   // Get payment analytics
   async getPaymentAnalytics(
     startDate?: string,
-    endDate?: string
+    endDate?: string,
   ): Promise<{
     totalPayments: number;
     totalAmount: number;
@@ -703,7 +796,7 @@ export const paymentService = {
       const totalPayments = paymentsList.length;
       const totalAmount = paymentsList.reduce(
         (sum, p) => sum + (p.total_received || 0),
-        0
+        0,
       );
       const cashPayments = paymentsList
         .filter((p) => p.payment_method === "cash")
@@ -715,10 +808,10 @@ export const paymentService = {
         .filter((p) => p.payment_method === "bank_transfer")
         .reduce((sum, p) => sum + (p.total_received || 0), 0);
       const completedPayments = paymentsList.filter(
-        (p) => p.status === "completed"
+        (p) => p.status === "completed",
       ).length;
       const pendingPayments = paymentsList.filter(
-        (p) => p.status === "pending"
+        (p) => p.status === "pending",
       ).length;
 
       const dailyGroups: Record<string, number> = {};
@@ -731,7 +824,7 @@ export const paymentService = {
         ([date, amount]) => ({
           date,
           amount,
-        })
+        }),
       );
 
       return {
@@ -748,5 +841,24 @@ export const paymentService = {
       console.error("Error in getPaymentAnalytics:", error);
       throw error;
     }
+  },
+
+  // Helper: Generate payment prefix from company name
+  generatePaymentPrefix(companyName: string): string {
+    if (!companyName || companyName.trim() === "") {
+      return "PAY";
+    }
+
+    // Clean company name: remove special chars, get first 3 letters
+    const cleanName = companyName
+      .replace(/[^a-zA-Z0-9]/g, "") // Remove non-alphanumeric
+      .toUpperCase()
+      .substring(0, 3);
+
+    if (cleanName.length >= 3) {
+      return `PAY-${cleanName}`;
+    }
+
+    return "PAY";
   },
 };

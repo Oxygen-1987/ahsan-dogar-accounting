@@ -13,6 +13,7 @@ import {
   Space,
   Alert,
   App,
+  Typography,
 } from "antd";
 import { customerService } from "../../services/customerService";
 import { paymentService } from "../../services/paymentService";
@@ -21,6 +22,7 @@ import dayjs from "dayjs";
 
 const { Option } = Select;
 const { TextArea } = Input;
+const { Text } = Typography;
 
 interface ReceivePaymentModalProps {
   visible: boolean;
@@ -40,10 +42,13 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(
-    null
+    null,
   );
   const [outstandingBalance, setOutstandingBalance] = useState(0);
   const [loadingBalance, setLoadingBalance] = useState(false);
+  const [generatedPaymentNumber, setGeneratedPaymentNumber] =
+    useState<string>("");
+  const [generatingPaymentNumber, setGeneratingPaymentNumber] = useState(false);
 
   useEffect(() => {
     if (visible) {
@@ -54,7 +59,7 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
       if (customer) {
         console.log(
           "Customer provided, will auto-select:",
-          customer.company_name
+          customer.company_name,
         );
       }
     }
@@ -69,6 +74,7 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
         });
         setSelectedCustomer(foundCustomer);
         loadCustomerOutstandingBalance(foundCustomer.id);
+        generatePaymentNumber(foundCustomer.id);
       }
     }
   }, [visible, customers, customer, form]);
@@ -77,6 +83,7 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
     form.resetFields();
     setSelectedCustomer(null);
     setOutstandingBalance(0);
+    setGeneratedPaymentNumber("");
     form.setFieldsValue({
       payment_date: dayjs(),
       payment_method: "cash",
@@ -96,10 +103,8 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
   const loadCustomerOutstandingBalance = async (customerId: string) => {
     try {
       setLoadingBalance(true);
-      // This returns balance that already includes opening balance
-      const balance = await customerService.getCustomerOutstandingBalance(
-        customerId
-      );
+      const balance =
+        await customerService.getCustomerOutstandingBalance(customerId);
       setOutstandingBalance(balance);
       console.log(`Outstanding balance for payment modal:`, balance);
     } catch (error) {
@@ -110,12 +115,30 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
     }
   };
 
+  const generatePaymentNumber = async (customerId: string) => {
+    try {
+      setGeneratingPaymentNumber(true);
+      const paymentNumber =
+        await paymentService.generateCustomerPaymentNumber(customerId);
+      setGeneratedPaymentNumber(paymentNumber);
+      form.setFieldsValue({ payment_number: paymentNumber });
+      console.log(`Generated payment number: ${paymentNumber}`);
+    } catch (error) {
+      console.error("Failed to generate payment number:", error);
+      setGeneratedPaymentNumber("PAY-001");
+    } finally {
+      setGeneratingPaymentNumber(false);
+    }
+  };
+
   const handleCustomerChange = async (customerId: string) => {
     console.log("Customer changed to ID:", customerId);
 
     if (!customerId) {
       setSelectedCustomer(null);
       setOutstandingBalance(0);
+      setGeneratedPaymentNumber("");
+      form.setFieldsValue({ payment_number: "" });
       return;
     }
 
@@ -125,6 +148,7 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
 
       if (customerId) {
         await loadCustomerOutstandingBalance(customerId);
+        await generatePaymentNumber(customerId);
       }
     } catch (error) {
       console.error("Error in handleCustomerChange:", error);
@@ -147,20 +171,22 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
   };
 
   const handleSubmit = async (values: any) => {
-    console.log("Form submission values:", values); // Debug log
+    console.log("Form submission values:", values);
 
     // Parse the amount as float to handle any string conversion issues
     const paymentAmount = parseFloat(values.total_received) || 0;
 
-    console.log("Parsed payment amount:", paymentAmount); // Debug log
+    console.log("Parsed payment amount:", paymentAmount);
 
     if (paymentAmount <= 0) {
       message.error("Please enter a valid payment amount greater than 0");
       return;
     }
 
-    if (!values.payment_number || !values.payment_number.trim()) {
-      message.error("Please enter a payment number");
+    if (paymentAmount > outstandingBalance) {
+      message.error(
+        `Payment amount cannot exceed outstanding balance of PKR ${outstandingBalance.toLocaleString()}`,
+      );
       return;
     }
 
@@ -168,33 +194,36 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
 
     setLoading(true);
     try {
-      let paymentStatus: PaymentStatus = "completed";
+      // Use the generated payment number
+      const paymentNumber = generatedPaymentNumber || values.payment_number;
 
-      if (
-        values.payment_method === "cheque" ||
-        values.payment_method === "parchi"
-      ) {
-        paymentStatus = "pending";
+      if (!paymentNumber) {
+        message.error("Payment number is required");
+        setLoading(false);
+        return;
       }
 
       // Check if payment number already exists
       const { payments: existingPayments } =
         await paymentService.getAllPayments();
       const isDuplicate = existingPayments.some(
-        (p: any) => p.payment_number === values.payment_number.trim()
+        (p: any) => p.payment_number === paymentNumber,
       );
 
       if (isDuplicate) {
-        message.error(
-          `Payment number "${values.payment_number}" already exists. Please use a different number.`
+        // If duplicate, generate a new one
+        console.log(
+          `Payment number "${paymentNumber}" already exists, regenerating...`,
         );
+        await generatePaymentNumber(values.customer_id);
+        message.error(`Payment number conflict. New number generated.`);
         setLoading(false);
         return;
       }
 
       const paymentData = {
         customer_id: values.customer_id,
-        payment_number: values.payment_number.trim(),
+        payment_number: paymentNumber,
         payment_date: values.payment_date.format("YYYY-MM-DD"),
         total_received: paymentAmount,
         payment_method: values.payment_method,
@@ -212,10 +241,16 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
       console.log("Payment creation result:", result);
 
       if (result) {
+        const paymentStatus =
+          values.payment_method === "cheque" ||
+          values.payment_method === "parchi"
+            ? "pending"
+            : "completed";
+
         message.success(
           `Payment of PKR ${paymentAmount.toLocaleString()} received successfully${
             paymentStatus === "pending" ? " (Pending Clearance)" : ""
-          }`
+          }`,
         );
 
         // Refresh customer balance
@@ -244,6 +279,22 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
     { value: "jazzcash", label: "JazzCash" },
     { value: "easypaisa", label: "EasyPaisa" },
   ];
+
+  // Helper function to get payment prefix preview
+  const getPaymentPrefixPreview = (customer: Customer | null) => {
+    if (!customer || !customer.company_name) return "PAY";
+
+    const cleanName = customer.company_name
+      .replace(/[^a-zA-Z0-9]/g, "")
+      .toUpperCase()
+      .substring(0, 3);
+
+    if (cleanName.length >= 3) {
+      return `PAY-${cleanName}`;
+    }
+
+    return "PAY";
+  };
 
   return (
     <Modal
@@ -287,23 +338,26 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
                 placeholder="Select customer"
                 onChange={handleCustomerChange}
                 showSearch
-                optionFilterProp="children"
-                filterOption={(input, option) =>
-                  (option?.children as string)
-                    .toLowerCase()
-                    .includes(input.toLowerCase())
-                }
+                optionFilterProp="label"
+                filterOption={(input, option) => {
+                  const label = option?.label as string;
+                  return (
+                    label?.toLowerCase().includes(input.toLowerCase()) || false
+                  );
+                }}
+                filterSort={(optionA, optionB) => {
+                  const labelA = (optionA?.label as string) || "";
+                  const labelB = (optionB?.label as string) || "";
+                  return labelA.localeCompare(labelB);
+                }}
                 allowClear
                 loading={customers.length === 0}
                 value={selectedCustomer?.id}
-              >
-                {customers.map((customer) => (
-                  <Option key={customer.id} value={customer.id}>
-                    {customer.company_name} ({customer.first_name}{" "}
-                    {customer.last_name})
-                  </Option>
-                ))}
-              </Select>
+                options={customers.map((customer) => ({
+                  value: customer.id,
+                  label: `${customer.company_name} (${customer.first_name} ${customer.last_name})`,
+                }))}
+              />
             </Form.Item>
 
             {selectedCustomer && (
@@ -339,17 +393,18 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
               </Card>
             )}
 
-            <Form.Item
-              name="payment_number"
-              label="Payment Number"
-              rules={[
-                { required: true, message: "Please enter payment number" },
-              ]}
-              help="Enter any payment number format (e.g., PAY-001, CHQ-2024-01, CASH-123)"
-            >
+            {/* Auto-generated Payment Number */}
+            <Form.Item label="Payment Number">
               <Input
-                placeholder="Enter payment number"
-                style={{ width: "100%" }}
+                value={generatedPaymentNumber}
+                readOnly
+                placeholder="Select customer to generate payment number"
+                style={{
+                  backgroundColor: "#f5f5f5",
+                  fontWeight: "bold",
+                  color: "#1890ff",
+                }}
+                suffix={generatingPaymentNumber ? "⏳" : "✓"}
               />
             </Form.Item>
 
@@ -366,14 +421,14 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
                   validator: (_, value) => {
                     if (value === undefined || value === null || value === "") {
                       return Promise.reject(
-                        new Error("Please enter payment amount")
+                        new Error("Please enter payment amount"),
                       );
                     }
                     if (parseFloat(value) > outstandingBalance) {
                       return Promise.reject(
                         new Error(
-                          `Payment amount cannot exceed outstanding balance of PKR ${outstandingBalance.toLocaleString()}`
-                        )
+                          `Payment amount cannot exceed outstanding balance of PKR ${outstandingBalance.toLocaleString()}`,
+                        ),
                       );
                     }
                     return Promise.resolve();
@@ -521,7 +576,7 @@ const ReceivePaymentModal: React.FC<ReceivePaymentModalProps> = ({
           <Alert
             message="Credit Balance"
             description={`This customer has a credit balance of PKR ${Math.abs(
-              outstandingBalance
+              outstandingBalance,
             ).toLocaleString()}. Recording a payment will increase their credit.`}
             type="warning"
             showIcon

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Table,
   Card,
@@ -16,7 +16,6 @@ import {
   InputNumber,
   message,
   Popconfirm,
-  App,
 } from "antd";
 import {
   PlusOutlined,
@@ -25,16 +24,19 @@ import {
   DollarOutlined,
   ReloadOutlined,
   DeleteOutlined,
+  UserOutlined,
 } from "@ant-design/icons";
-import type { ColumnsType } from "antd/es/table";
+import type { ColumnsType, TablePaginationConfig } from "antd/es/table";
 import { paymentService } from "../services/paymentService";
 import type {
   Payment,
   PaymentFormData,
   PaymentMethod,
   PaymentStatus,
+  PaymentFilters,
 } from "../types";
 import dayjs from "dayjs";
+import debounce from "lodash/debounce";
 import ReceivePaymentModal from "../components/payments/ReceivePaymentModal";
 import PaymentSidePanel from "../components/payments/PaymentSidePanel";
 import LoadingSpinner from "../components/common/LoadingSpinner";
@@ -44,40 +46,246 @@ const { Option } = Select;
 const { RangePicker } = DatePicker;
 
 const Payments: React.FC = () => {
+  const [allPayments, setAllPayments] = useState<Payment[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [summary, setSummary] = useState<any>({});
+
+  // Search and filters
   const [searchText, setSearchText] = useState("");
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [customerFilter, setCustomerFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<any>(null);
+
+  // Pagination
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: 50,
+    total: 0,
+    showSizeChanger: true,
+    showQuickJumper: true,
+    showTotal: (total: number, range: [number, number]) =>
+      `${range[0]}-${range[1]} of ${total} payments`,
+  });
+
+  // Extract unique customers for filter
+  const [customers, setCustomers] = useState<
+    Array<{
+      id: string;
+      company_name: string;
+      first_name: string;
+      last_name: string;
+    }>
+  >([]);
 
   // Modals and panels
   const [isReceivePaymentModalVisible, setIsReceivePaymentModalVisible] =
     useState(false);
-  const [isDistributionModalVisible, setIsDistributionModalVisible] = // Changed
+  const [isDistributionModalVisible, setIsDistributionModalVisible] =
     useState(false);
   const [isSidePanelVisible, setIsSidePanelVisible] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
 
+  // Load initial data ONCE
   useEffect(() => {
-    loadPayments();
+    const loadInitialData = async () => {
+      setInitialLoading(true);
+      try {
+        const result = await paymentService.getAllPayments();
+        const allPaymentsData = result.payments || [];
+
+        setAllPayments(allPaymentsData);
+
+        // Extract unique customers
+        const uniqueCustomersMap = new Map();
+        allPaymentsData.forEach((payment: Payment) => {
+          if (
+            payment.customer &&
+            !uniqueCustomersMap.has(payment.customer.id)
+          ) {
+            uniqueCustomersMap.set(payment.customer.id, payment.customer);
+          }
+        });
+        setCustomers(Array.from(uniqueCustomersMap.values()));
+
+        // Apply initial filtering
+        applyFiltersAndUpdateUI(allPaymentsData);
+      } catch (error) {
+        console.error("Failed to load payments:", error);
+        message.error("Failed to load payments");
+        setAllPayments([]);
+        setPayments([]);
+        setCustomers([]);
+        setSummary({});
+      } finally {
+        setInitialLoading(false);
+        setLoading(false);
+      }
+    };
+
+    loadInitialData();
   }, []);
 
-  const loadPayments = async () => {
-    setLoading(true);
-    try {
-      const result = await paymentService.getAllPayments();
-      setPayments(result.payments);
-      setSummary(result.summary);
-    } catch (error) {
-      console.error("Failed to load payments:", error);
-      message.error("Failed to load payments");
-      setPayments([]);
-      setSummary({});
-    } finally {
-      setLoading(false);
+  // Function to apply all filters and update UI
+  const applyFiltersAndUpdateUI = useCallback(
+    (dataToFilter: Payment[]) => {
+      setLoading(true);
+
+      try {
+        let filteredPayments = [...dataToFilter];
+
+        // Apply payment method filter
+        if (paymentMethodFilter !== "all") {
+          filteredPayments = filteredPayments.filter(
+            (payment) => payment.payment_method === paymentMethodFilter,
+          );
+        }
+
+        // Apply status filter
+        if (statusFilter !== "all") {
+          filteredPayments = filteredPayments.filter(
+            (payment) => payment.status === statusFilter,
+          );
+        }
+
+        // Apply customer filter
+        if (customerFilter !== "all") {
+          filteredPayments = filteredPayments.filter(
+            (payment) => payment.customer_id === customerFilter,
+          );
+        }
+
+        // Apply date range filter
+        if (dateRange && dateRange[0] && dateRange[1]) {
+          const startDate = dateRange[0];
+          const endDate = dateRange[1];
+
+          filteredPayments = filteredPayments.filter((payment) => {
+            const paymentDate = dayjs(payment.payment_date);
+            return (
+              paymentDate.isAfter(startDate.subtract(1, "day")) &&
+              paymentDate.isBefore(endDate.add(1, "day"))
+            );
+          });
+        }
+
+        // Apply search filter LAST
+        if (searchText) {
+          const searchLower = searchText.toLowerCase();
+          filteredPayments = filteredPayments.filter((payment) => {
+            return (
+              payment.payment_number?.toLowerCase().includes(searchLower) ||
+              payment.customer?.company_name
+                ?.toLowerCase()
+                .includes(searchLower) ||
+              payment.customer?.first_name
+                ?.toLowerCase()
+                .includes(searchLower) ||
+              payment.customer?.last_name
+                ?.toLowerCase()
+                .includes(searchLower) ||
+              payment.reference_number?.toLowerCase().includes(searchLower)
+            );
+          });
+        }
+
+        // Calculate totals for summary
+        const total = filteredPayments.length;
+        const totalReceived = filteredPayments.reduce(
+          (sum, payment) => sum + payment.total_received,
+          0,
+        );
+        const totalDistributed = filteredPayments.reduce(
+          (sum, payment) =>
+            sum +
+            (payment.distributions?.reduce(
+              (distSum, dist) => distSum + dist.amount,
+              0,
+            ) || 0),
+          0,
+        );
+
+        // Paginate
+        const startIndex = (pagination.current - 1) * pagination.pageSize;
+        const endIndex = startIndex + pagination.pageSize;
+        const paginatedPayments = filteredPayments.slice(startIndex, endIndex);
+
+        // Update state
+        setPayments(paginatedPayments);
+        setPagination((prev) => ({ ...prev, total }));
+        setSummary({
+          totalPayments: total,
+          totalReceived,
+          totalDistributed,
+          availableForDistribution: totalReceived - totalDistributed,
+        });
+      } catch (error) {
+        console.error("Error applying filters:", error);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      paymentMethodFilter,
+      statusFilter,
+      customerFilter,
+      dateRange,
+      searchText,
+      pagination.current,
+      pagination.pageSize,
+    ],
+  );
+
+  // Apply filters when filter values change
+  useEffect(() => {
+    if (!initialLoading && allPayments.length > 0) {
+      setPagination((prev) => ({ ...prev, current: 1 }));
+      applyFiltersAndUpdateUI(allPayments);
     }
+  }, [
+    paymentMethodFilter,
+    statusFilter,
+    customerFilter,
+    dateRange,
+    initialLoading,
+  ]);
+
+  // Apply filters when pagination changes
+  useEffect(() => {
+    if (!initialLoading && allPayments.length > 0) {
+      applyFiltersAndUpdateUI(allPayments);
+    }
+  }, [searchText, initialLoading]);
+
+  // Debounced search handler - NO API CALLS
+  const debouncedSearch = useMemo(
+    () =>
+      debounce((searchValue: string) => {
+        setSearchText(searchValue);
+      }, 300),
+    [],
+  );
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    debouncedSearch(e.target.value);
+  };
+
+  const handleSearch = (value: string) => {
+    setSearchText(value);
+  };
+
+  const handleClearSearch = () => {
+    setSearchText("");
+  };
+
+  const handleTableChange = (newPagination: TablePaginationConfig) => {
+    setPagination((prev) => ({
+      ...prev,
+      current: newPagination.current || 1,
+      pageSize: newPagination.pageSize || 50,
+    }));
   };
 
   const getPaymentMethodColor = (method: PaymentMethod) => {
@@ -108,7 +316,6 @@ const Payments: React.FC = () => {
   };
 
   const handleAddDistribution = (payment: Payment) => {
-    // Changed
     setSelectedPayment(payment);
     setIsDistributionModalVisible(true);
   };
@@ -156,7 +363,11 @@ const Payments: React.FC = () => {
             duration: 3,
           });
 
-          await loadPayments();
+          // Refresh data
+          const result = await paymentService.getAllPayments();
+          const allPaymentsData = result.payments || [];
+          setAllPayments(allPaymentsData);
+          applyFiltersAndUpdateUI(allPaymentsData);
 
           if (selectedPayment?.id === payment.id) {
             setIsSidePanelVisible(false);
@@ -192,6 +403,7 @@ const Payments: React.FC = () => {
       dataIndex: "payment_number",
       key: "payment_number",
       render: (text: string) => <strong>{text}</strong>,
+      sorter: false,
     },
     {
       title: "Customer",
@@ -210,6 +422,7 @@ const Payments: React.FC = () => {
         ) : (
           "N/A"
         ),
+      sorter: false,
     },
     {
       title: "Amount",
@@ -217,9 +430,10 @@ const Payments: React.FC = () => {
       key: "total_received",
       render: (amount: number) => (
         <span style={{ fontWeight: "bold", color: "#00b96b" }}>
-          PKR {amount.toLocaleString()}
+          PKR {amount?.toLocaleString() || 0}
         </span>
       ),
+      sorter: false,
     },
     {
       title: "Payment Method",
@@ -227,34 +441,34 @@ const Payments: React.FC = () => {
       key: "payment_method",
       render: (method: PaymentMethod) => (
         <Tag color={getPaymentMethodColor(method)}>
-          {method.replace("_", " ").toUpperCase()}
+          {method?.replace("_", " ").toUpperCase()}
         </Tag>
       ),
+      sorter: false,
     },
     {
       title: "Date",
       dataIndex: "payment_date",
       key: "payment_date",
       render: (date: string) => dayjs(date).format("DD/MM/YYYY"),
+      sorter: false,
     },
     {
       title: "Status",
       dataIndex: "status",
       key: "status",
       render: (status: PaymentStatus) => (
-        <Tag color={getStatusColor(status)}>{status.toUpperCase()}</Tag>
+        <Tag color={getStatusColor(status)}>{status?.toUpperCase()}</Tag>
       ),
+      sorter: false,
     },
     {
-      title: "Distributions", // Changed
+      title: "Distributions",
       key: "distributions",
       render: (_, record) => {
         const totalDistributed =
-          record.distributions?.reduce(
-            // Changed
-            (sum, dist) => sum + dist.amount,
-            0
-          ) || 0;
+          record.distributions?.reduce((sum, dist) => sum + dist.amount, 0) ||
+          0;
         const remaining = record.total_received - totalDistributed;
 
         return (
@@ -279,7 +493,6 @@ const Payments: React.FC = () => {
       width: 200,
       render: (_, record) => {
         const canDistribute = () => {
-          // Changed
           if (
             record.payment_method === "cheque" ||
             record.payment_method === "parchi"
@@ -303,7 +516,7 @@ const Payments: React.FC = () => {
                 icon={<DollarOutlined />}
                 size="small"
                 type="primary"
-                onClick={() => handleAddDistribution(record)} // Changed
+                onClick={() => handleAddDistribution(record)}
               >
                 Distribute
               </Button>
@@ -326,35 +539,7 @@ const Payments: React.FC = () => {
     },
   ];
 
-  const filteredPayments = payments.filter((payment) => {
-    const matchesSearch =
-      payment.payment_number.toLowerCase().includes(searchText.toLowerCase()) ||
-      payment.customer?.company_name
-        .toLowerCase()
-        .includes(searchText.toLowerCase()) ||
-      payment.customer?.first_name
-        .toLowerCase()
-        .includes(searchText.toLowerCase()) ||
-      payment.customer?.last_name
-        .toLowerCase()
-        .includes(searchText.toLowerCase());
-
-    const matchesMethod =
-      paymentMethodFilter === "all" ||
-      payment.payment_method === paymentMethodFilter;
-
-    const matchesStatus =
-      statusFilter === "all" || payment.status === statusFilter;
-
-    const matchesDate =
-      !dateRange ||
-      (dayjs(payment.payment_date).isAfter(dateRange[0]) &&
-        dayjs(payment.payment_date).isBefore(dateRange[1]));
-
-    return matchesSearch && matchesMethod && matchesStatus && matchesDate;
-  });
-
-  if (loading && payments.length === 0) {
+  if (initialLoading) {
     return <LoadingSpinner />;
   }
 
@@ -392,7 +577,7 @@ const Payments: React.FC = () => {
         <Col span={6}>
           <Card>
             <Statistic
-              title="Total Distributed" // Changed
+              title="Total Distributed"
               value={summary.totalDistributed || 0}
               precision={0}
               prefix="PKR"
@@ -403,7 +588,7 @@ const Payments: React.FC = () => {
         <Col span={6}>
           <Card>
             <Statistic
-              title="Available for Distribution" // Changed
+              title="Available for Distribution"
               value={summary.availableForDistribution || 0}
               precision={0}
               prefix="PKR"
@@ -415,23 +600,47 @@ const Payments: React.FC = () => {
 
       {/* Filters */}
       <Card style={{ marginBottom: 16 }}>
-        <Row gutter={16} align="middle">
-          <Col span={6}>
+        <Row gutter={[16, 16]} align="middle">
+          <Col xs={24} sm={12} md={6} lg={6}>
             <Search
-              placeholder="Search payments..."
+              placeholder="Search payments or customers..."
               allowClear
               enterButton={<SearchOutlined />}
-              onSearch={setSearchText}
-              onChange={(e) => setSearchText(e.target.value)}
+              onChange={handleSearchChange}
+              onSearch={handleSearch}
+              onClear={handleClearSearch}
             />
           </Col>
-          <Col span={4}>
+          <Col xs={12} sm={6} md={4} lg={3}>
+            <Select
+              placeholder="Customer"
+              style={{ width: "100%" }}
+              value={customerFilter}
+              onChange={(value) => {
+                setCustomerFilter(value);
+              }}
+              allowClear
+              suffixIcon={<UserOutlined />}
+              loading={loading}
+            >
+              <Option value="all">All Customers</Option>
+              {customers.map((customer) => (
+                <Option key={customer.id} value={customer.id}>
+                  {customer.company_name}
+                </Option>
+              ))}
+            </Select>
+          </Col>
+          <Col xs={12} sm={6} md={4} lg={3}>
             <Select
               placeholder="Payment Method"
               style={{ width: "100%" }}
               value={paymentMethodFilter}
-              onChange={setPaymentMethodFilter}
+              onChange={(value) => {
+                setPaymentMethodFilter(value);
+              }}
               allowClear
+              loading={loading}
             >
               <Option value="all">All Methods</Option>
               <Option value="cash">Cash</Option>
@@ -442,13 +651,16 @@ const Payments: React.FC = () => {
               <Option value="easypaisa">Easypaisa</Option>
             </Select>
           </Col>
-          <Col span={4}>
+          <Col xs={12} sm={6} md={4} lg={3}>
             <Select
               placeholder="Status"
               style={{ width: "100%" }}
               value={statusFilter}
-              onChange={setStatusFilter}
+              onChange={(value) => {
+                setStatusFilter(value);
+              }}
               allowClear
+              loading={loading}
             >
               <Option value="all">All Status</Option>
               <Option value="pending">Pending</Option>
@@ -457,18 +669,34 @@ const Payments: React.FC = () => {
               <Option value="cancelled">Cancelled</Option>
             </Select>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} md={6} lg={6}>
             <RangePicker
               style={{ width: "100%" }}
               format="DD/MM/YYYY"
-              onChange={setDateRange}
+              onChange={(dates) => {
+                setDateRange(dates);
+              }}
+              disabled={loading}
             />
           </Col>
-          <Col span={4}>
-            <Space>
+          <Col xs={24} sm={12} md={4} lg={3}>
+            <Space style={{ display: "flex", justifyContent: "flex-end" }}>
               <Button
                 icon={<ReloadOutlined />}
-                onClick={loadPayments}
+                onClick={async () => {
+                  setLoading(true);
+                  try {
+                    const result = await paymentService.getAllPayments();
+                    const allPaymentsData = result.payments || [];
+                    setAllPayments(allPaymentsData);
+                    applyFiltersAndUpdateUI(allPaymentsData);
+                    message.success("Payments refreshed");
+                  } catch (error) {
+                    message.error("Failed to refresh payments");
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
                 loading={loading}
               >
                 Refresh
@@ -477,6 +705,7 @@ const Payments: React.FC = () => {
                 type="primary"
                 icon={<PlusOutlined />}
                 onClick={handleReceivePayment}
+                loading={loading}
               >
                 Receive Payment
               </Button>
@@ -489,7 +718,7 @@ const Payments: React.FC = () => {
       <Card>
         <Table
           columns={columns}
-          dataSource={filteredPayments}
+          dataSource={payments}
           rowKey="id"
           loading={loading}
           onRow={(record) => ({
@@ -506,10 +735,12 @@ const Payments: React.FC = () => {
             style: { cursor: "pointer" },
           })}
           pagination={{
-            pageSize: 10,
-            showSizeChanger: true,
-            showQuickJumper: true,
+            ...pagination,
+            current: pagination.current,
+            pageSize: pagination.pageSize,
+            total: pagination.total,
           }}
+          onChange={handleTableChange}
         />
       </Card>
 
@@ -517,21 +748,42 @@ const Payments: React.FC = () => {
       <ReceivePaymentModal
         visible={isReceivePaymentModalVisible}
         onCancel={() => setIsReceivePaymentModalVisible(false)}
-        onSuccess={() => {
-          loadPayments();
-          message.success("Payment received successfully");
+        onSuccess={async () => {
+          setIsReceivePaymentModalVisible(false);
+          setLoading(true);
+          try {
+            const result = await paymentService.getAllPayments();
+            const allPaymentsData = result.payments || [];
+            setAllPayments(allPaymentsData);
+            applyFiltersAndUpdateUI(allPaymentsData);
+            message.success("Payment received successfully");
+          } catch (error) {
+            message.error("Failed to refresh payments");
+          } finally {
+            setLoading(false);
+          }
         }}
       />
 
       {/* Distribution Modal */}
-      <DistributionModal // Changed from AllocationModal
-        visible={isDistributionModalVisible} // Changed
+      <DistributionModal
+        visible={isDistributionModalVisible}
         payment={selectedPayment}
-        onCancel={() => setIsDistributionModalVisible(false)} // Changed
-        onSuccess={() => {
-          loadPayments();
-          setIsDistributionModalVisible(false); // Changed
-          message.success("Distribution added successfully"); // Changed
+        onCancel={() => setIsDistributionModalVisible(false)}
+        onSuccess={async () => {
+          setIsDistributionModalVisible(false);
+          setLoading(true);
+          try {
+            const result = await paymentService.getAllPayments();
+            const allPaymentsData = result.payments || [];
+            setAllPayments(allPaymentsData);
+            applyFiltersAndUpdateUI(allPaymentsData);
+            message.success("Distribution added successfully");
+          } catch (error) {
+            message.error("Failed to refresh payments");
+          } finally {
+            setLoading(false);
+          }
         }}
       />
 
@@ -543,20 +795,31 @@ const Payments: React.FC = () => {
           setSelectedPayment(null);
         }}
         payment={selectedPayment}
-        onDistribute={handleAddDistribution} // Changed from onAllocate
+        onDistribute={handleAddDistribution}
         onEdit={() => {
           message.info("Edit payment functionality coming soon");
         }}
         onDelete={handleDeletePayment}
-        onReload={loadPayments}
+        onReload={async () => {
+          setLoading(true);
+          try {
+            const result = await paymentService.getAllPayments();
+            const allPaymentsData = result.payments || [];
+            setAllPayments(allPaymentsData);
+            applyFiltersAndUpdateUI(allPaymentsData);
+          } catch (error) {
+            message.error("Failed to refresh payments");
+          } finally {
+            setLoading(false);
+          }
+        }}
       />
     </div>
   );
 };
 
-// Distribution Modal Component (renamed from AllocationModal)
+// Distribution Modal Component
 interface DistributionModalProps {
-  // Changed
   visible: boolean;
   payment: Payment | null;
   onCancel: () => void;
@@ -564,7 +827,6 @@ interface DistributionModalProps {
 }
 
 const DistributionModal: React.FC<DistributionModalProps> = ({
-  // Changed
   visible,
   payment,
   onCancel,
@@ -581,7 +843,7 @@ const DistributionModal: React.FC<DistributionModalProps> = ({
 
   const availableAmount = payment
     ? payment.total_received -
-      (payment.distributions?.reduce((sum, dist) => sum + dist.amount, 0) || 0) // Changed
+      (payment.distributions?.reduce((sum, dist) => sum + dist.amount, 0) || 0)
     : 0;
 
   const handleSubmit = async (values: any) => {
@@ -595,18 +857,17 @@ const DistributionModal: React.FC<DistributionModalProps> = ({
     setLoading(true);
     try {
       await paymentService.addDistribution(payment.id, {
-        // Changed
         ...values,
         allocation_date: values.allocation_date.format("YYYY-MM-DD"),
       });
 
-      message.success("Distribution added successfully"); // Changed
+      message.success("Distribution added successfully");
       onSuccess();
       onCancel();
     } catch (error: any) {
-      console.error("Failed to add distribution:", error); // Changed
+      console.error("Failed to add distribution:", error);
       message.error(
-        `Failed to add distribution: ${error.message || "Unknown error"}` // Changed
+        `Failed to add distribution: ${error.message || "Unknown error"}`,
       );
     } finally {
       setLoading(false);
@@ -622,7 +883,7 @@ const DistributionModal: React.FC<DistributionModalProps> = ({
 
   return (
     <Modal
-      title="Add Payment Distribution" // Changed
+      title="Add Payment Distribution"
       open={visible}
       onCancel={handleCancel}
       footer={null}
@@ -639,7 +900,7 @@ const DistributionModal: React.FC<DistributionModalProps> = ({
       >
         <strong>Payment: {payment.payment_number}</strong>
         <br />
-        <span>Available for distribution: </span> {/* Changed */}
+        <span>Available for distribution: </span>
         <strong style={{ color: "#00b96b" }}>
           PKR {availableAmount.toLocaleString()}
         </strong>
@@ -703,16 +964,16 @@ const DistributionModal: React.FC<DistributionModalProps> = ({
           rules={[{ required: true, message: "Please enter purpose" }]}
         >
           <Input.TextArea
-            placeholder="Enter purpose of distribution" // Changed
+            placeholder="Enter purpose of distribution"
             rows={3}
           />
         </Form.Item>
 
         <Form.Item
           name="allocation_date"
-          label="Distribution Date" // Changed
+          label="Distribution Date"
           rules={[
-            { required: true, message: "Please select distribution date" }, // Changed
+            { required: true, message: "Please select distribution date" },
           ]}
         >
           <DatePicker style={{ width: "100%" }} format="DD/MM/YYYY" />
@@ -725,7 +986,7 @@ const DistributionModal: React.FC<DistributionModalProps> = ({
         <Form.Item>
           <Space>
             <Button type="primary" htmlType="submit" loading={loading}>
-              Add Distribution {/* Changed */}
+              Add Distribution
             </Button>
             <Button onClick={handleCancel}>Cancel</Button>
           </Space>
