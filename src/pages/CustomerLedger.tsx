@@ -100,35 +100,54 @@ const CustomerLedger: React.FC = () => {
     });
 
     const result: LedgerEntry[] = [];
+
+    // We track a running balance across the whole expansion so every
+    // line-item row shows the correct "balance after this row".
+    let runningBalance = 0;
+
     for (const entry of entries) {
+      // Non-invoice rows: adjust running balance and keep as-is
       if (entry.type !== "invoice" || !entry.reference_id) {
-        result.push(entry);
-        continue;
-      }
-      const lineItems = itemsByInvoice[entry.reference_id] || [];
-      if (lineItems.length === 0) {
-        // No line items found - keep the original row as-is
-        result.push(entry);
+        runningBalance += (entry.debit || 0) - (entry.credit || 0);
+        result.push({
+          ...entry,
+          balance: runningBalance,
+        });
         continue;
       }
 
-      lineItems.forEach((item, idx) => {
-        const isLast = idx === lineItems.length - 1;
+      const lineItems = itemsByInvoice[entry.reference_id] || [];
+
+      if (lineItems.length === 0) {
+        // No line items found (legacy invoice without items):
+        // keep the original single row untouched
+        runningBalance += (entry.debit || 0) - (entry.credit || 0);
         result.push({
           ...entry,
-          // Make the row key unique per line item
+          balance: runningBalance,
+        });
+        continue;
+      }
+
+      // For each line item, use its own amount as the debit for that row
+      lineItems.forEach((item, idx) => {
+        const lineDebit = item.amount || 0;
+        runningBalance += lineDebit;
+
+        result.push({
+          ...entry,
           id: `${entry.id}-li-${idx}`,
           description: item.description || entry.description,
           invoice_rate: item.rate,
           invoice_size: item.inches,
           invoice_quantity: item.quantity,
-          // Only the last line-item row carries the money movement
-          debit: isLast ? entry.debit : 0,
-          credit: isLast ? entry.credit : 0,
-          balance: isLast ? entry.balance : entry.balance,
+          debit: lineDebit,
+          credit: 0,
+          balance: runningBalance,
         });
       });
     }
+
     return result;
   };
 
