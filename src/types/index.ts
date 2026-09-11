@@ -205,6 +205,12 @@ export interface LedgerEntry extends BaseEntity {
   description: string;
   is_hidden?: boolean;
   invoice_id?: string;
+
+  // NEW — populated only when a single invoice is expanded into
+  // multiple rows (one per line item) on the ledger page.
+  invoice_rate?: number;
+  invoice_size?: number;
+  invoice_quantity?: number;
 }
 
 export interface DiscountEntry {

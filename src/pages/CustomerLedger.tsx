@@ -28,6 +28,7 @@ import type { LedgerEntry, Customer } from "../types";
 import { customerService } from "../services/customerService";
 import { ledgerService } from "../services/ledgerService";
 import { pdfService } from "../services/pdfService";
+import { supabase } from "../services/supabaseClient";
 import dayjs from "dayjs";
 import "./CustomerLedger.css";
 
@@ -36,7 +37,7 @@ const { RangePicker } = DatePicker;
 const { Option } = Select;
 
 const CustomerLedger: React.FC = () => {
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
   const navigate = useNavigate();
   const { id } = useParams();
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -64,6 +65,73 @@ const CustomerLedger: React.FC = () => {
     }
   };
 
+  /**
+   * Expand invoice ledger entries into one row per line item.
+   * Only the LAST line-item row of each invoice carries the debit
+   * and running balance, so totals stay correct.
+   */
+  const expandInvoiceLineItems = async (
+    entries: LedgerEntry[],
+  ): Promise<LedgerEntry[]> => {
+    const invoiceEntries = entries.filter(
+      (e) => e.type === "invoice" && e.reference_id,
+    );
+    if (invoiceEntries.length === 0) return entries;
+
+    const invoiceIds = invoiceEntries.map((e) => e.reference_id);
+
+    const { data: items, error } = await supabase
+      .from("invoice_items")
+      .select("id, invoice_id, description, quantity, inches, rate, amount")
+      .in("invoice_id", invoiceIds)
+      .order("created_at", { ascending: true });
+
+    if (error || !items) {
+      console.error("Error fetching invoice items for ledger:", error);
+      return entries;
+    }
+
+    const itemsByInvoice: Record<string, any[]> = {};
+    items.forEach((item) => {
+      if (!itemsByInvoice[item.invoice_id]) {
+        itemsByInvoice[item.invoice_id] = [];
+      }
+      itemsByInvoice[item.invoice_id].push(item);
+    });
+
+    const result: LedgerEntry[] = [];
+    for (const entry of entries) {
+      if (entry.type !== "invoice" || !entry.reference_id) {
+        result.push(entry);
+        continue;
+      }
+      const lineItems = itemsByInvoice[entry.reference_id] || [];
+      if (lineItems.length === 0) {
+        // No line items found - keep the original row as-is
+        result.push(entry);
+        continue;
+      }
+
+      lineItems.forEach((item, idx) => {
+        const isLast = idx === lineItems.length - 1;
+        result.push({
+          ...entry,
+          // Make the row key unique per line item
+          id: `${entry.id}-li-${idx}`,
+          description: item.description || entry.description,
+          invoice_rate: item.rate,
+          invoice_size: item.inches,
+          invoice_quantity: item.quantity,
+          // Only the last line-item row carries the money movement
+          debit: isLast ? entry.debit : 0,
+          credit: isLast ? entry.credit : 0,
+          balance: isLast ? entry.balance : entry.balance,
+        });
+      });
+    }
+    return result;
+  };
+
   const loadLedgerEntries = async () => {
     setLoading(true);
     try {
@@ -74,7 +142,7 @@ const CustomerLedger: React.FC = () => {
         entries = await ledgerService.getCustomerLedgerByDate(
           id!,
           startDate.format("YYYY-MM-DD"),
-          endDate.format("YYYY-MM-DD")
+          endDate.format("YYYY-MM-DD"),
         );
       } else {
         entries = await ledgerService.getCustomerLedger(id!);
@@ -85,7 +153,10 @@ const CustomerLedger: React.FC = () => {
         entries = entries.filter((entry) => entry.type === transactionType);
       }
 
-      setLedgerEntries(entries);
+      // Expand invoice entries into one row per line item
+      const expandedEntries = await expandInvoiceLineItems(entries);
+
+      setLedgerEntries(expandedEntries);
     } catch (error) {
       message.error("Failed to load ledger entries");
     } finally {
@@ -100,12 +171,11 @@ const CustomerLedger: React.FC = () => {
     try {
       const summary = calculateSummary();
 
-      // Get period label
       let periodLabel = "All Transactions";
       if (dateRange && dateRange.length === 2) {
         const [startDate, endDate] = dateRange;
         periodLabel = `${startDate.format("DD/MM/YYYY")} to ${endDate.format(
-          "DD/MM/YYYY"
+          "DD/MM/YYYY",
         )}`;
       }
 
@@ -117,7 +187,7 @@ const CustomerLedger: React.FC = () => {
           periodStart: dateRange?.[0]?.format("YYYY-MM-DD"),
           periodEnd: dateRange?.[1]?.format("YYYY-MM-DD"),
         },
-        periodLabel
+        periodLabel,
       );
 
       message.success("PDF generated successfully");
@@ -138,10 +208,8 @@ const CustomerLedger: React.FC = () => {
 
     setExportLoading(true);
     try {
-      // Convert ledger entries to CSV format
       const csvContent = convertToCSV(ledgerEntries, customer);
 
-      // Create and download CSV file
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const link = document.createElement("a");
       const url = URL.createObjectURL(blob);
@@ -149,7 +217,7 @@ const CustomerLedger: React.FC = () => {
       link.setAttribute("href", url);
       link.setAttribute(
         "download",
-        `Ledger_${customer.company_name}_${dayjs().format("YYYY-MM-DD")}.csv`
+        `Ledger_${customer.company_name}_${dayjs().format("YYYY-MM-DD")}.csv`,
       );
 
       link.style.visibility = "hidden";
@@ -170,7 +238,11 @@ const CustomerLedger: React.FC = () => {
     const headers = [
       "Date",
       "Type",
+      "Invoice #",
       "Description",
+      "Size (in)",
+      "Rate",
+      "Qty",
       "Debit (PKR)",
       "Credit (PKR)",
       "Balance (PKR)",
@@ -179,7 +251,11 @@ const CustomerLedger: React.FC = () => {
     const rows = entries.map((entry) => [
       dayjs(entry.date).format("DD/MM/YYYY"),
       getTypeDisplayName(entry.type),
+      entry.type === "invoice" ? entry.reference_number : "",
       entry.description,
+      entry.invoice_size ?? "",
+      entry.invoice_rate ?? "",
+      entry.invoice_quantity ?? "",
       entry.debit,
       entry.credit,
       entry.balance,
@@ -213,13 +289,15 @@ const CustomerLedger: React.FC = () => {
     {
       title: "#",
       key: "index",
-      width: 60,
+      width: 45,
+      align: "center",
       render: (_, __, index) => index + 1,
     },
     {
       title: "Date",
       dataIndex: "date",
       key: "date",
+      width: 90,
       render: (date: string) => dayjs(date).format("DD/MM/YYYY"),
       sorter: (a, b) => dayjs(a.date).valueOf() - dayjs(b.date).valueOf(),
       defaultSortOrder: "ascend",
@@ -228,6 +306,7 @@ const CustomerLedger: React.FC = () => {
       title: "Type",
       dataIndex: "type",
       key: "type",
+      width: 100,
       render: (type: string) => (
         <Tag color={getTypeColor(type)}>{getTypeDisplayName(type)}</Tag>
       ),
@@ -240,26 +319,62 @@ const CustomerLedger: React.FC = () => {
       onFilter: (value, record) => record.type === value,
     },
     {
+      title: "Invoice #",
+      dataIndex: "reference_number",
+      key: "reference_number",
+      width: 115,
+      render: (refNumber: string, record: LedgerEntry) => {
+        if (record.type === "invoice" && refNumber) {
+          return <Text strong>{refNumber}</Text>;
+        }
+        return <Text type="secondary">-</Text>;
+      },
+    },
+    {
       title: "Description",
       dataIndex: "description",
       key: "description",
+      width: 200,
+      ellipsis: true,
       render: (description: string, record: LedgerEntry) => {
-        if (record.type === "discount") {
-          // Clean up discount description
-          let cleanDesc = description;
-          if (cleanDesc.startsWith("Discount: ")) {
-            cleanDesc = cleanDesc.substring(10); // Remove "Discount: " prefix
-          }
-          return cleanDesc;
+        if (
+          record.type === "discount" &&
+          description.startsWith("Discount: ")
+        ) {
+          return description.substring(10);
         }
         return description;
       },
-      ellipsis: true,
+    },
+    {
+      title: "Size",
+      dataIndex: "invoice_size",
+      key: "invoice_size",
+      width: 60,
+      align: "right",
+      render: (v?: number) => (v != null && v > 0 ? v.toLocaleString() : "-"),
+    },
+    {
+      title: "Rate",
+      dataIndex: "invoice_rate",
+      key: "invoice_rate",
+      width: 65,
+      align: "right",
+      render: (v?: number) => (v != null && v > 0 ? v.toLocaleString() : "-"),
+    },
+    {
+      title: "Qty",
+      dataIndex: "invoice_quantity",
+      key: "invoice_quantity",
+      width: 55,
+      align: "right",
+      render: (v?: number) => (v != null && v > 0 ? v.toLocaleString() : "-"),
     },
     {
       title: "Debit",
       dataIndex: "debit",
       key: "debit",
+      width: 100,
       render: (debit: number) =>
         debit > 0 ? (
           <Text strong style={{ color: "#cf1322" }}>
@@ -274,6 +389,7 @@ const CustomerLedger: React.FC = () => {
       title: "Credit",
       dataIndex: "credit",
       key: "credit",
+      width: 100,
       render: (credit: number) =>
         credit > 0 ? (
           <Text strong style={{ color: "#389e0d" }}>
@@ -288,6 +404,7 @@ const CustomerLedger: React.FC = () => {
       title: "Balance",
       dataIndex: "balance",
       key: "balance",
+      width: 110,
       render: (balance: number) => (
         <Text
           strong
@@ -323,69 +440,46 @@ const CustomerLedger: React.FC = () => {
   };
 
   const calculateSummary = () => {
-    // Find opening balance entry
     const openingEntry = ledgerEntries.find(
-      (entry) => entry.type === "opening_balance"
+      (entry) => entry.type === "opening_balance",
     );
     const openingBalance =
       openingEntry?.balance || customer?.opening_balance || 0;
 
-    // Calculate opening balance debit amount (if positive)
     const openingDebit =
       openingEntry?.debit || (openingBalance > 0 ? openingBalance : 0);
     const openingCredit =
       openingEntry?.credit ||
       (openingBalance < 0 ? Math.abs(openingBalance) : 0);
 
-    // Filter entries excluding opening balance for subsequent calculations
     const nonOpeningEntries = ledgerEntries.filter(
-      (entry) => entry.type !== "opening_balance"
+      (entry) => entry.type !== "opening_balance",
     );
 
     let runningBalance = openingBalance;
-    const entriesWithCalculatedBalance = nonOpeningEntries.map((entry) => {
+    nonOpeningEntries.forEach((entry) => {
       runningBalance =
         runningBalance + (entry.debit || 0) - (entry.credit || 0);
-      return {
-        ...entry,
-        calculated_balance: runningBalance,
-      };
     });
 
-    // Calculate totals INCLUDING opening balance
     const totalDebitsIncludingOpening = ledgerEntries.reduce(
       (sum, entry) => sum + (entry.debit || 0),
-      0
+      0,
     );
-
     const totalCreditsIncludingOpening = ledgerEntries.reduce(
       (sum, entry) => sum + (entry.credit || 0),
-      0
+      0,
     );
 
-    // Calculate totals EXCLUDING opening balance
-    const totalDebitsExcludingOpening = nonOpeningEntries.reduce(
-      (sum, entry) => sum + (entry.debit || 0),
-      0
-    );
-
-    const totalCreditsExcludingOpening = nonOpeningEntries.reduce(
-      (sum, entry) => sum + (entry.credit || 0),
-      0
-    );
-
-    // Closing balance should be the last calculated balance
     const closingBalance = runningBalance;
 
     return {
       openingBalance,
-      openingDebit, // Add these if you want to show them separately
+      openingDebit,
       openingCredit,
       closingBalance,
-      totalDebits: totalDebitsIncludingOpening, // INCLUDE opening balance in total debits
-      totalCredits: totalCreditsIncludingOpening, // INCLUDE opening balance in total credits
-      totalDebitsExcludingOpening, // For reference if needed
-      totalCreditsExcludingOpening, // For reference if needed
+      totalDebits: totalDebitsIncludingOpening,
+      totalCredits: totalCreditsIncludingOpening,
     };
   };
 
@@ -506,8 +600,8 @@ const CustomerLedger: React.FC = () => {
                     closingBalance > 0
                       ? "#cf1322"
                       : closingBalance < 0
-                      ? "#389e0d"
-                      : "#666",
+                        ? "#389e0d"
+                        : "#666",
                 }}
               />
             </Card>
@@ -560,24 +654,24 @@ const CustomerLedger: React.FC = () => {
               showTotal: (total, range) =>
                 `${range[0]}-${range[1]} of ${total} transactions`,
             }}
-            scroll={{ x: 1000 }}
+            scroll={{ x: 1040 }}
             summary={() => (
               <Table.Summary fixed>
                 <Table.Summary.Row>
-                  <Table.Summary.Cell index={0} colSpan={4}>
+                  <Table.Summary.Cell index={0} colSpan={8}>
                     <Text strong>Totals</Text>
                   </Table.Summary.Cell>
-                  <Table.Summary.Cell index={1} align="right">
+                  <Table.Summary.Cell index={8} align="right">
                     <Text strong style={{ color: "#cf1322" }}>
                       PKR {totalDebits.toLocaleString()}
                     </Text>
                   </Table.Summary.Cell>
-                  <Table.Summary.Cell index={2} align="right">
+                  <Table.Summary.Cell index={9} align="right">
                     <Text strong style={{ color: "#389e0d" }}>
                       PKR {totalCredits.toLocaleString()}
                     </Text>
                   </Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} align="right">
+                  <Table.Summary.Cell index={10} align="right">
                     <Text
                       strong
                       style={{
@@ -585,8 +679,8 @@ const CustomerLedger: React.FC = () => {
                           closingBalance > 0
                             ? "#cf1322"
                             : closingBalance < 0
-                            ? "#389e0d"
-                            : "#666",
+                              ? "#389e0d"
+                              : "#666",
                       }}
                     >
                       PKR {closingBalance.toLocaleString()}
